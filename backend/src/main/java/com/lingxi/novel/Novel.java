@@ -1,0 +1,152 @@
+package com.lingxi.novel;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Lob;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
+import jakarta.persistence.Table;
+
+import java.time.LocalDateTime;
+
+@Entity
+@Table(name = "novels")
+public class Novel {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(name = "user_id", nullable = false)
+    private Long userId;
+
+    @Column(nullable = false, length = 80)
+    private String title;
+
+    @Column(length = 1000)
+    private String description;
+
+    @Column(length = 30)
+    private String genre;
+
+    /** 草稿 / 连载中 / 已完结 */
+    @Column(length = 20)
+    private String status;
+
+    @Column(name = "target_words")
+    private Integer targetWords;
+
+    @Column(name = "word_count", nullable = false)
+    private Long wordCount = 0L;
+
+    @Lob
+    @Column(name = "outline")
+    private String outline;
+
+    @Column(name = "cover_color", length = 20)
+    private String coverColor;
+
+    @Column(name = "created_at", nullable = false)
+    private LocalDateTime createdAt;
+
+    @Column(name = "updated_at", nullable = false)
+    private LocalDateTime updatedAt;
+
+    @PrePersist
+    void prePersist() {
+        this.createdAt = LocalDateTime.now();
+        this.updatedAt = LocalDateTime.now();
+    }
+
+    @PreUpdate
+    void preUpdate() {
+        this.updatedAt = LocalDateTime.now();
+    }
+
+    public Long getId() {
+        return id;
+    }
+
+    public Long getUserId() {
+        return userId;
+    }
+
+    public void setUserId(Long userId) {
+        this.userId = userId;
+    }
+
+    public String getTitle() {
+        return title;
+    }
+
+    public void setTitle(String title) {
+        this.title = title;
+    }
+
+    public String getDescription() {
+        return description;
+    }
+
+    public void setDescription(String description) {
+        this.description = description;
+    }
+
+    public String getGenre() {
+        return genre;
+    }
+
+    public void setGenre(String genre) {
+        this.genre = genre;
+    }
+
+    public String getStatus() {
+        return status;
+    }
+
+    public void setStatus(String status) {
+        this.status = status;
+    }
+
+    public Integer getTargetWords() {
+        return targetWords;
+    }
+
+    public void setTargetWords(Integer targetWords) {
+        this.targetWords = targetWords;
+    }
+
+    public Long getWordCount() {
+        return wordCount;
+    }
+
+    public void setWordCount(Long wordCount) {
+        this.wordCount = wordCount;
+    }
+
+    public String getOutline() {
+        return outline;
+    }
+
+    public void setOutline(String outline) {
+        this.outline = outline;
+    }
+
+    public String getCoverColor() {
+        return coverColor;
+    }
+
+    public void setCoverColor(String coverColor) {
+        this.coverColor = coverColor;
+    }
+
+    public LocalDateTime getCreatedAt() {
+        return createdAt;
+    }
+
+    public LocalDateTime getUpdatedAt() {
+        return updatedAt;
+    }
+}

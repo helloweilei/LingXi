@@ -1,0 +1,48 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: lingxi-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root123456
+      MYSQL_DATABASE: lingxi
+      MYSQL_USER: lingxi
+      MYSQL_PASSWORD: lingxi123
+      TZ: Asia/Shanghai
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-ulingxi", "-plingxi123"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    container_name: lingxi-backend
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DB: lingxi
+      MYSQL_USER: lingxi
+      MYSQL_PASSWORD: lingxi123
+      # 接入真实大模型：改为 openai 并填入兼容接口信息（DeepSeek/通义/Kimi 等）
+      LINGXI_AI_PROVIDER: mock
+      LINGXI_AI_BASE_URL: https://api.deepseek.com/v1
+      LINGXI_AI_API_KEY: ""
+      LINGXI_AI_MODEL: deepseek-chat
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    container_name: lingxi-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+volumes:
+  mysql-data:

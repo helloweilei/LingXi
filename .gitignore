@@ -1,0 +1,20 @@
+# Java / Maven
+backend/target/
+backend/data/
+*.class
+
+# Node
+frontend/node_modules/
+frontend/dist/
+*.local
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# 系统与临时
+.DS_Store
+Thumbs.db
+*.log
+gui-test-screenshots/

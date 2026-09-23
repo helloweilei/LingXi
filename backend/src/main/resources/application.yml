@@ -1,0 +1,39 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: lingxi-backend
+  main:
+    web-application-type: servlet
+  datasource:
+    url: jdbc:h2:file:./data/lingxi;MODE=MySQL
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+  h2:
+    console:
+      enabled: true
+
+lingxi:
+  jwt:
+    # HS256 密钥，生产环境务必修改为足够长的随机串
+    secret: lingxi-creation-jwt-secret-2026-please-change-me-0123456789abcdef
+    expire-hours: 72
+  ai:
+    # mock = 内置离线示例引擎（无需 API Key）；openai = 任意 OpenAI 兼容接口（DeepSeek/通义/Kimi 等）
+    provider: mock
+    base-url: https://api.deepseek.com/v1
+    api-key: ""
+    model: deepseek-chat
+    temperature: 0.8
+    connect-timeout-seconds: 15
+    read-timeout-seconds: 180
+
+logging:
+  level:
+    com.lingxi: info

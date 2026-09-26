@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Outlet, useNavigate } from 'react-router-dom';
-import { Avatar, Dropdown, Tag, message } from 'antd';
+import { Avatar, Dropdown, Tag, Tooltip, message } from 'antd';
 import { EditOutlined, LogoutOutlined, SettingOutlined, UserOutlined } from '@ant-design/icons';
 import { useAuth } from '../store/auth';
 import { authApi, aiApi } from '../api';
@@ -50,7 +50,7 @@ export default function MainLayout() {
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <AiStatusTag refreshKey={statusKey} />
+          <AiStatusTag refreshKey={statusKey} onOpen={() => setSettingsOpen(true)} />
           <Dropdown
             menu={{
               items: [
@@ -78,7 +78,7 @@ export default function MainLayout() {
   );
 }
 
-function AiStatusTag({ refreshKey }: { refreshKey: number }) {
+function AiStatusTag({ refreshKey, onOpen }: { refreshKey: number; onOpen: () => void }) {
   const [status, setStatus] = useState<{ provider: string; model: string } | null>(null);
   useEffect(() => {
     aiApi
@@ -88,8 +88,14 @@ function AiStatusTag({ refreshKey }: { refreshKey: number }) {
   }, [refreshKey]);
   const isMock = !status || status.provider === 'mock';
   return (
-    <Tag color={isMock ? 'gold' : 'green'} style={{ marginLeft: 0 }}>
-      {isMock ? 'AI 示例引擎' : `AI：${status?.model ?? '已接入'}`}
-    </Tag>
+    <Tooltip title={isMock ? '当前为内置示例引擎，点击配置自己的模型（如 DeepSeek）' : `当前使用 ${status?.model ?? '已接入模型'}，点击修改配置`}>
+      <Tag
+        color={isMock ? 'gold' : 'green'}
+        style={{ marginLeft: 0, cursor: 'pointer' }}
+        onClick={onOpen}
+      >
+        {isMock ? 'AI 示例引擎' : `AI：${status?.model ?? '已接入'}`}
+      </Tag>
+    </Tooltip>
   );
 }

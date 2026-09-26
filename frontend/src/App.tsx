@@ -5,6 +5,7 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import NovelDetail from './pages/NovelDetail';
 import Editor from './pages/Editor';
+import Reader from './pages/Reader';
 import type { ReactNode } from 'react';
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -32,6 +33,14 @@ export default function App() {
         element={
           <RequireAuth>
             <Editor />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/read/:chapterId"
+        element={
+          <RequireAuth>
+            <Reader />
           </RequireAuth>
         }
       />

@@ -303,7 +303,7 @@ function ChaptersTab({ novelId, refreshKey }: { novelId: number; refreshKey: num
             title: '章节名',
             dataIndex: 'title',
             render: (t: string, r: ChapterMeta) => (
-              <a onClick={() => navigate(`/write/${r.id}`)}>{t}</a>
+              <a onClick={() => navigate(`/read/${r.id}`)}>{t}</a>
             ),
           },
           {

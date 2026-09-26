@@ -111,7 +111,15 @@ export default function NovelDetail() {
           <div style={{ flex: 1 }}>
             <Space size={10} align="center" wrap>
               <h2 style={{ margin: 0 }}>{novel.title}</h2>
-              <Tag color="purple">{novel.genre}</Tag>
+              {(novel.genre ?? '')
+                .split(',')
+                .map((g) => g.trim())
+                .filter(Boolean)
+                .map((g, i) => (
+                  <Tag key={i} color="purple">
+                    {g}
+                  </Tag>
+                ))}
               <Tag>{novel.status ?? '草稿'}</Tag>
               <Button type="link" icon={<EditOutlined />} onClick={() => setEditOpen(true)}>
                 编辑信息

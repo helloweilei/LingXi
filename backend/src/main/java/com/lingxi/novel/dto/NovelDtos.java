@@ -13,7 +13,7 @@ public final class NovelDtos {
     public record CreateReq(
             @NotBlank(message = "书名不能为空") @Size(max = 80, message = "书名最长 80 字") String title,
             @Size(max = 1000) String description,
-            @Size(max = 30) String genre,
+            @Size(max = 100) String genre,
             Integer targetWords,
             String coverColor) {
     }
@@ -21,7 +21,7 @@ public final class NovelDtos {
     public record UpdateReq(
             @Size(max = 80) String title,
             @Size(max = 1000) String description,
-            @Size(max = 30) String genre,
+            @Size(max = 100) String genre,
             @Size(max = 20) String status,
             Integer targetWords,
             String coverColor,

@@ -132,7 +132,15 @@ export default function Dashboard() {
                   description={
                     <div>
                       <div style={{ marginBottom: 6 }}>
-                        <Tag>{n.genre}</Tag>
+                        {(n.genre ?? '')
+                          .split(',')
+                          .map((g) => g.trim())
+                          .filter(Boolean)
+                          .map((g, i) => (
+                            <Tag key={i} style={{ marginInlineEnd: 4 }}>
+                              {g}
+                            </Tag>
+                          ))}
                         <span className="muted">
                           {n.chapterCount} 章 · {(n.wordCount ?? 0).toLocaleString()} 字
                         </span>

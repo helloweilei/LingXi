@@ -3,7 +3,30 @@ import { Button, Form, Input, InputNumber, Modal, Select } from 'antd';
 import { novelApi } from '../api';
 import type { Novel } from '../api/types';
 
-export const GENRES = ['玄幻', '仙侠', '都市', '科幻', '悬疑', '历史', '游戏', '轻小说', '现实主义', '其他'];
+export const GENRES = [
+  {
+    label: '男频',
+    options: [
+      '玄幻', '仙侠', '奇幻', '武侠', '都市', '军事', '历史', '游戏', '体育', '科幻', '悬疑', '惊悚', '灵异',
+    ].map((g) => ({ value: g, label: g })),
+  },
+  {
+    label: '女频',
+    options: [
+      '现代言情', '古代言情', '青春校园', '幻想言情', '悬疑言情', '种田文', '宫斗宅斗', '重生', '穿越',
+    ].map((g) => ({ value: g, label: g })),
+  },
+  {
+    label: '通用',
+    options: [
+      '轻小说', '同人', '短篇', '现实', '脑洞', '其他',
+    ].map((g) => ({ value: g, label: g })),
+  },
+];
+
+/** 把库里的逗号分隔类型串转成数组；数组 join 回存储串 */
+export const genreToArray = (v?: string | null) => (v ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+export const genreToString = (arr?: string[]) => (arr ?? []).join(',');
 export const NOVEL_STATUS = ['草稿', '连载中', '已完结'];
 
 interface Props {
@@ -21,8 +44,8 @@ export default function NovelFormModal({ open, editing, onClose, onSaved }: Prop
     if (open) {
       form.setFieldsValue(
         editing
-          ? { ...editing }
-          : { title: '', genre: '玄幻', description: '', targetWords: 500000, status: '草稿' }
+          ? { ...editing, genre: genreToArray(editing.genre) }
+          : { title: '', genre: ['玄幻'], description: '', targetWords: 500000, status: '草稿' }
       );
     }
   }, [open, editing, form]);
@@ -30,9 +53,10 @@ export default function NovelFormModal({ open, editing, onClose, onSaved }: Prop
   const onFinish = async (values: any) => {
     setSaving(true);
     try {
+      const payload = { ...values, genre: genreToString(values.genre) };
       const saved = editing
-        ? await novelApi.update(editing.id, values)
-        : await novelApi.create(values);
+        ? await novelApi.update(editing.id, payload)
+        : await novelApi.create(payload);
       onSaved(saved);
       onClose();
     } catch (e: any) {
@@ -59,8 +83,16 @@ export default function NovelFormModal({ open, editing, onClose, onSaved }: Prop
           <Input placeholder="例如：星降大陆" maxLength={80} showCount />
         </Form.Item>
         <div style={{ display: 'flex', gap: 12 }}>
-          <Form.Item name="genre" label="类型" style={{ flex: 1 }}>
-            <Select options={GENRES.map((g) => ({ value: g, label: g }))} />
+          <Form.Item name="genre" label="类型" style={{ flex: 1 }} rules={[{ required: true, message: '请至少选择一个类型' }]}>
+            <Select
+              mode="multiple"
+              allowClear
+              placeholder="可多选，最多 6 个"
+              maxTagCount={3}
+              options={GENRES}
+              optionFilterProp="label"
+              onChange={(v: string[]) => (v.length > 6 ? form.setFieldValue('genre', v.slice(0, 6)) : undefined)}
+            />
           </Form.Item>
           {editing && (
             <Form.Item name="status" label="状态" style={{ flex: 1 }}>

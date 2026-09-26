@@ -58,6 +58,7 @@ export default function NovelDetail() {
   const [editOpen, setEditOpen] = useState(false);
   const [outlineOpen, setOutlineOpen] = useState(false);
   const [outline, setOutline] = useState('');
+  const [chapterRefresh, setChapterRefresh] = useState(0);
 
   const load = useCallback(async () => {
     const n = await novelApi.detail(novelId);
@@ -144,7 +145,7 @@ export default function NovelDetail() {
           {
             key: 'chapters',
             label: '章节',
-            children: <ChaptersTab novelId={novelId} />,
+            children: <ChaptersTab novelId={novelId} refreshKey={chapterRefresh} />,
           },
           {
             key: 'characters',
@@ -193,7 +194,15 @@ export default function NovelDetail() {
           {
             key: 'auto',
             label: '自动创作',
-            children: <AutoWritePanel novelId={novelId} onProgress={load} />,
+            children: (
+              <AutoWritePanel
+                novelId={novelId}
+                onProgress={() => {
+                  load();
+                  setChapterRefresh((k) => k + 1);
+                }}
+              />
+            ),
           },
         ]}
       />
@@ -228,7 +237,7 @@ export default function NovelDetail() {
 
 /* ---------------- 章节 ---------------- */
 
-function ChaptersTab({ novelId }: { novelId: number }) {
+function ChaptersTab({ novelId, refreshKey }: { novelId: number; refreshKey: number }) {
   const navigate = useNavigate();
   const [chapters, setChapters] = useState<ChapterMeta[]>([]);
   const [loading, setLoading] = useState(true);
@@ -249,7 +258,7 @@ function ChaptersTab({ novelId }: { novelId: number }) {
 
   useEffect(() => {
     load();
-  }, [load]);
+  }, [load, refreshKey]);
 
   const createChapter = async () => {
     setCreating(true);

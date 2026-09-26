@@ -1,15 +1,18 @@
 import { useEffect, useState } from 'react';
 import { Outlet, useNavigate } from 'react-router-dom';
 import { Avatar, Dropdown, Tag, message } from 'antd';
-import { EditOutlined, LogoutOutlined, UserOutlined } from '@ant-design/icons';
+import { EditOutlined, LogoutOutlined, SettingOutlined, UserOutlined } from '@ant-design/icons';
 import { useAuth } from '../store/auth';
 import { authApi, aiApi } from '../api';
 import { get } from '../api/http';
 import type { UserVO } from '../api/types';
+import ModelSettingsModal from '../components/ModelSettingsModal';
 
 export default function MainLayout() {
   const navigate = useNavigate();
   const { user, token, setUser, logout } = useAuth();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [statusKey, setStatusKey] = useState(0);
 
   useEffect(() => {
     if (token && !user) {
@@ -29,6 +32,8 @@ export default function MainLayout() {
       logout();
       message.success('已退出登录');
       navigate('/login');
+    } else if (key === 'settings') {
+      setSettingsOpen(true);
     }
   };
 
@@ -45,10 +50,14 @@ export default function MainLayout() {
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <AiStatusTag />
+          <AiStatusTag refreshKey={statusKey} />
           <Dropdown
             menu={{
-              items: [{ key: 'logout', icon: <LogoutOutlined />, label: '退出登录' }],
+              items: [
+                { key: 'settings', icon: <SettingOutlined />, label: '模型配置' },
+                { type: 'divider' },
+                { key: 'logout', icon: <LogoutOutlined />, label: '退出登录' },
+              ],
               onClick: ({ key }) => onMenuClick(key),
             }}
           >
@@ -60,18 +69,23 @@ export default function MainLayout() {
         </div>
       </header>
       <Outlet />
+      <ModelSettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        onSaved={() => setStatusKey((k) => k + 1)}
+      />
     </div>
   );
 }
 
-function AiStatusTag() {
+function AiStatusTag({ refreshKey }: { refreshKey: number }) {
   const [status, setStatus] = useState<{ provider: string; model: string } | null>(null);
   useEffect(() => {
     aiApi
       .status()
       .then(setStatus)
       .catch(() => undefined);
-  }, []);
+  }, [refreshKey]);
   const isMock = !status || status.provider === 'mock';
   return (
     <Tag color={isMock ? 'gold' : 'green'} style={{ marginLeft: 0 }}>

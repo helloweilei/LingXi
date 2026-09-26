@@ -76,9 +76,11 @@ Nginx 站点配置参考 `frontend/nginx.conf`（将 `proxy_pass http://backend:
 - 表结构由 **Flyway** 管理（`spring.flyway.*` + `ddl-auto: none`），应用启动时自动执行 `classpath:db/migration/` 下的迁移脚本：
   - `V1__init.sql`：基础五表（users / novels / chapters / novel_characters / world_settings）
   - `V2__memory_and_versions.sql`：章节软删除列 + 版本快照 / 章节摘要 / 故事脑三张新表
-- **已有旧库升级**：Flyway 以 `baseline-on-migrate=true` 自动基线到 V1，只增量执行 V2，无需手工干预；升级脚本一律新增 `Vn__*.sql`，禁止修改已执行脚本。
+  - `V3__ai_config_and_tasks.sql`：用户级模型配置表 `ai_config` + 自动创作任务表 `writing_tasks`（仅新增表，可安全升级旧库）
+- **已有旧库升级**：Flyway 以 `baseline-on-migrate=true` 自动基线到 V1，只增量执行后续迁移，无需手工干预；升级脚本一律新增 `Vn__*.sql`，禁止修改已执行脚本。
 - H2 开发库位于 `backend/data/lingxi.mv.db`，删除该文件即重置数据。
 - 生产 MySQL 建议定期 `mysqldump` 备份 `lingxi` 库；Docker 数据卷 `mysql-data` 即全部数据。
+- **模型接入（P2）**：用户可在前端右上角「模型配置」自助填写接口地址 / API Key / 模型名（如 DeepSeek），配置存入 `ai_config` 表、按用户隔离、立即生效，无需为每个用户改环境变量；上表 `LINGXI_AI_*` 全局变量仅作为未配置用户的兜底。
 
 ## 五、升级与回滚
 

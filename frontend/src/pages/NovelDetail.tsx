@@ -39,6 +39,7 @@ import type {
   WorldVO,
 } from '../api/types';
 import AiDrawer from '../components/AiDrawer';
+import AutoWritePanel from '../components/AutoWritePanel';
 import NovelFormModal, { GENRES, NOVEL_STATUS } from '../components/NovelFormModal';
 
 const ROLE_COLOR: Record<string, string> = {
@@ -188,6 +189,11 @@ export default function NovelDetail() {
             key: 'chat',
             label: 'AI 助手',
             children: <ChatTab novelId={novelId} />,
+          },
+          {
+            key: 'auto',
+            label: '自动创作',
+            children: <AutoWritePanel novelId={novelId} />,
           },
         ]}
       />

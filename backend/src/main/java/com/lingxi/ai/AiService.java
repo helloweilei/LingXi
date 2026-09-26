@@ -31,7 +31,7 @@ public class AiService {
             4. 输出纯文本，段落之间用空行分隔，不要使用 Markdown 语法。
             """;
 
-    private final LlmClient llmClient;
+    private final LlmClientProvider llmClientProvider;
     private final NovelService novelService;
     private final ChapterRepository chapterRepository;
     private final CharacterRepository characterRepository;
@@ -40,12 +40,12 @@ public class AiService {
     private final StoryMemoryRepository storyMemoryRepository;
     private final ContextBuilder contextBuilder;
 
-    public AiService(LlmClient llmClient, NovelService novelService,
+    public AiService(LlmClientProvider llmClientProvider, NovelService novelService,
                      ChapterRepository chapterRepository, CharacterRepository characterRepository,
                      WorldSettingRepository worldSettingRepository,
                      ChapterSummaryRepository chapterSummaryRepository, StoryMemoryRepository storyMemoryRepository,
                      ContextBuilder contextBuilder) {
-        this.llmClient = llmClient;
+        this.llmClientProvider = llmClientProvider;
         this.novelService = novelService;
         this.chapterRepository = chapterRepository;
         this.characterRepository = characterRepository;
@@ -53,6 +53,11 @@ public class AiService {
         this.chapterSummaryRepository = chapterSummaryRepository;
         this.storyMemoryRepository = storyMemoryRepository;
         this.contextBuilder = contextBuilder;
+    }
+
+    /** 当前用户的生效 LLM 客户端（用户级配置优先，全局配置兜底） */
+    private LlmClient llm(User user) {
+        return llmClientProvider.forUser(user);
     }
 
     public Flux<String> outline(Long novelId, User user) {
@@ -65,7 +70,7 @@ public class AiService {
                 2. 起承转合完整，卷末设置高潮；
                 3. 结尾附一段“主题与卖点”。
                 """;
-        return llmClient.stream(AiTaskType.OUTLINE, contextOf(novel, null), SYSTEM_PROMPT, prompt);
+        return llm(user).stream(AiTaskType.OUTLINE, contextOf(novel, null), SYSTEM_PROMPT, prompt);
     }
 
     public Flux<String> continueChapter(Long novelId, Long chapterId, User user) {
@@ -95,7 +100,7 @@ public class AiService {
                 【任务】
                 请从当前内容结束处自然续写 500-800 字，衔接上文语气与节奏，不要重复已有内容，不要进行总结。
                 """);
-        return llmClient.stream(AiTaskType.CONTINUE, contextOf(novel, null), SYSTEM_PROMPT, prompt.toString());
+        return llm(user).stream(AiTaskType.CONTINUE, contextOf(novel, null), SYSTEM_PROMPT, prompt.toString());
     }
 
     public Flux<String> polish(Long novelId, String text, User user) {
@@ -105,7 +110,40 @@ public class AiService {
                 \n【任务】
                 请对以上文字进行润色：提升文笔与画面感、优化句式节奏，保留原意与人称视角，直接输出润色后的全文。
                 """;
-        return llmClient.stream(AiTaskType.POLISH, contextOf(novel, text), SYSTEM_PROMPT, prompt);
+        return llm(user).stream(AiTaskType.POLISH, contextOf(novel, text), SYSTEM_PROMPT, prompt);
+    }
+
+    /**
+     * 自动创作流水线专用：为“待写章节”生成整章正文。
+     * 自动流水线会先建好空章节再调用，因此这里统一按“已有章节、向尾部续写整章”处理。
+     */
+    public Flux<String> writeChapter(Long novelId, Long chapterId, int targetWords, User user) {
+        Novel novel = novelService.loadOwned(novelId, user);
+        Chapter chapter = loadChapter(novelId, chapterId);
+        String prevTail = chapterRepository
+                .findFirstByNovelIdAndDeletedFalseAndChapterOrderLessThanOrderByChapterOrderDescIdDesc(
+                        novel.getId(), chapter.getChapterOrder())
+                .map(c -> tail(c.getContent(), 800))
+                .orElse("");
+        String currentTail = tail(chapter.getContent(), 1200);
+
+        StringBuilder prompt = new StringBuilder(baseContext(novel));
+        if (!prevTail.isEmpty()) {
+            prompt.append("\n【上一章结尾】\n").append(prevTail).append("\n");
+        }
+        prompt.append("\n【当前章节】第").append(chapter.getChapterOrder())
+                .append("章 ").append(chapter.getTitle()).append("\n");
+        if (currentTail.isEmpty()) {
+            prompt.append("（本章尚未动笔，请直接开篇，注意与上一章情节自然衔接）");
+        } else {
+            prompt.append("\n【本章已写内容结尾】\n").append(currentTail);
+        }
+        prompt.append("""
+
+                【任务】
+                请为本章写出完整正文，目标字数约 %d 字：情节推进扎实、有场景描写与对话、结尾留钩子；直接输出正文，不要输出标题与解释。
+                """.formatted(targetWords));
+        return llm(user).stream(AiTaskType.WRITE_CHAPTER, contextOf(novel, chapter.getContent()), SYSTEM_PROMPT, prompt.toString());
     }
 
     public Flux<String> expand(Long novelId, String text, User user) {
@@ -115,7 +153,7 @@ public class AiService {
                 \n【任务】
                 请在不偏离原意的前提下，将以上文字扩写至原来的 2-3 倍，补充细节描写、心理活动与环境烘托，直接输出扩写后的全文。
                 """;
-        return llmClient.stream(AiTaskType.EXPAND, contextOf(novel, text), SYSTEM_PROMPT, prompt);
+        return llm(user).stream(AiTaskType.EXPAND, contextOf(novel, text), SYSTEM_PROMPT, prompt);
     }
 
     public Flux<String> chat(Long novelId, ChatReq req, User user) {
@@ -134,7 +172,7 @@ public class AiService {
                 【任务】
                 请围绕这部小说的创作问题进行回答，观点明确、建议具体可操作。
                 """);
-        return llmClient.stream(AiTaskType.CHAT, contextOf(novel, req.message()), SYSTEM_PROMPT, prompt.toString());
+        return llm(user).stream(AiTaskType.CHAT, contextOf(novel, req.message()), SYSTEM_PROMPT, prompt.toString());
     }
 
     /**
@@ -152,7 +190,7 @@ public class AiService {
                 请为本章生成 150-200 字的中文摘要：概括关键事件、人物状态变化与新增伏笔。只输出摘要正文，不要输出标题、序号或解释。
                 """;
         StringBuilder acc = new StringBuilder();
-        return llmClient.stream(AiTaskType.SUMMARIZE, contextOf(novel, chapter.getContent()), SYSTEM_PROMPT, prompt)
+        return llm(user).stream(AiTaskType.SUMMARIZE, contextOf(novel, chapter.getContent()), SYSTEM_PROMPT, prompt)
                 .doOnNext(acc::append)
                 .doOnComplete(() -> saveSummary(novel.getId(), chapter.getId(), acc.toString().trim()));
     }

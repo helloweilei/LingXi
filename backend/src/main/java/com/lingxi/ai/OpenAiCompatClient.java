@@ -32,19 +32,28 @@ public class OpenAiCompatClient implements LlmClient {
     private final long readTimeoutSeconds;
 
     public OpenAiCompatClient(AiProperties props, ObjectMapper objectMapper) {
+        this(props.getBaseUrl(), props.getApiKey(), props.getModel(), props.getTemperature(),
+                props.getReadTimeoutSeconds(), props.getConnectTimeoutSeconds(), objectMapper);
+    }
+
+    /**
+     * 显式参数构造：供用户级配置按需实例化（每个用户可持有独立的 baseUrl/apiKey/model）。
+     */
+    public OpenAiCompatClient(String baseUrl, String apiKey, String model, double temperature,
+                              int readTimeoutSeconds, int connectTimeoutSeconds, ObjectMapper objectMapper) {
         HttpClient httpClient = HttpClient.create()
-                .responseTimeout(Duration.ofSeconds(props.getReadTimeoutSeconds()))
-                .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, props.getConnectTimeoutSeconds() * 1000);
+                .responseTimeout(Duration.ofSeconds(readTimeoutSeconds))
+                .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, connectTimeoutSeconds * 1000);
         this.webClient = WebClient.builder()
-                .baseUrl(props.getBaseUrl())
-                .defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + props.getApiKey())
+                .baseUrl(baseUrl)
+                .defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
                 .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
                 .clientConnector(new ReactorClientHttpConnector(httpClient))
                 .build();
         this.objectMapper = objectMapper;
-        this.model = props.getModel();
-        this.temperature = props.getTemperature();
-        this.readTimeoutSeconds = props.getReadTimeoutSeconds();
+        this.model = model;
+        this.temperature = temperature;
+        this.readTimeoutSeconds = readTimeoutSeconds;
     }
 
     @Override

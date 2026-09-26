@@ -18,7 +18,9 @@
   - **AI 润色 / 扩写**：选中文字即可改写，确认后替换所选内容
   - **AI 摘要**：为指定章节流式生成 150-200 字摘要，自动写入记忆库
   - **AI 助手**：结合作品上下文的多轮创作对话
-- 🔌 **AI 供应商可替换**：内置离线示例引擎（Mock，无需任何 Key 即可体验全流程）；一行配置切换到任意 OpenAI 兼容接口（DeepSeek / 通义 / Kimi / OpenAI…）
+- 🚀 **AI 自动创作**：一键流水线——（可选）先生成全书大纲，再逐章生成完整正文并落库（自动快照），可选为每章生成摘要沉淀记忆。支持**全自动**一口气写完，或**逐章确认**（每章完成后等你批准再继续）；任务进度实时可见，可随时取消，同一本书同一时间只允许一个进行中任务
+- ⚙️ **用户级模型配置**：右上角账号菜单「模型配置」即可填写自己的接口地址 / API Key / 模型名（如 DeepSeek），配置按用户隔离、保存后立即生效，无需改任何配置文件；未配置时自动使用内置示例引擎
+- 🔌 **AI 供应商可替换**：内置离线示例引擎（Mock，无需任何 Key 即可体验全流程）；既可全局配置，也可每个用户各自接入任意 OpenAI 兼容接口（DeepSeek / 通义 / Kimi / OpenAI…）
 
 ## 技术栈
 
@@ -26,7 +28,7 @@
 | --- | --- |
 | 前端 | React 18 + TypeScript + Vite 5 + Ant Design 5 + zustand |
 | 后端 | Spring Boot 3.3（Java 17）+ Spring Security + JPA + WebClient（SSE 流式） |
-| 数据库 | 默认 H2（文件模式，零配置）；生产 MySQL 8（`prod` profile）。表结构由 **Flyway 管理迁移**（V1 初始表 + V2 版本/记忆表） |
+| 数据库 | 默认 H2（文件模式，零配置）；生产 MySQL 8（`prod` profile）。表结构由 **Flyway 管理迁移**（V1 初始表 + V2 版本/记忆表 + V3 模型配置/自动创作任务表） |
 | 部署 | Docker Compose（Nginx + Spring Boot + MySQL） |
 
 详细设计见 [docs/PRD.md](docs/PRD.md) 与 [docs/DESIGN.md](docs/DESIGN.md)。
@@ -61,7 +63,9 @@ docker compose up -d --build
 
 ## 接入真实大模型
 
-修改 `backend/src/main/resources/application.yml`（或通过环境变量覆盖）：
+**方式一（推荐，按用户配置）**：登录后在右上角账号菜单 →「模型配置」填写接口地址、API Key、模型名（如 `https://api.deepseek.com` + `deepseek-chat`），点击「测试连接」验证后保存即生效。配置仅对当前账号生效，其他人仍走示例引擎或各自的配置。
+
+**方式二（全局配置）**：修改 `backend/src/main/resources/application.yml`（或通过环境变量覆盖），作为所有未单独配置用户的兜底：
 
 ```yaml
 lingxi:

@@ -4,7 +4,6 @@ import com.lingxi.ai.dto.AiDtos.ChatReq;
 import com.lingxi.ai.dto.AiDtos.TextReq;
 import com.lingxi.common.ApiResponse;
 import com.lingxi.common.BizException;
-import com.lingxi.config.AiProperties;
 import com.lingxi.user.User;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
@@ -30,18 +29,19 @@ public class AiController {
     private static final Logger log = LoggerFactory.getLogger(AiController.class);
 
     private final AiService aiService;
-    private final AiProperties aiProperties;
+    private final LlmClientProvider llmClientProvider;
 
-    public AiController(AiService aiService, AiProperties aiProperties) {
+    public AiController(AiService aiService, LlmClientProvider llmClientProvider) {
         this.aiService = aiService;
-        this.aiProperties = aiProperties;
+        this.llmClientProvider = llmClientProvider;
     }
 
+    /** 返回当前用户生效的模型状态（用户级配置优先） */
     @GetMapping("/status")
-    public ApiResponse<Map<String, String>> status() {
+    public ApiResponse<Map<String, String>> status(@AuthenticationPrincipal User user) {
         return ApiResponse.ok(Map.of(
-                "provider", aiProperties.isRealLlm() ? "openai" : "mock",
-                "model", aiProperties.getModel()));
+                "provider", llmClientProvider.effectiveProvider(user),
+                "model", llmClientProvider.effectiveModel(user)));
     }
 
     @PostMapping(value = "/novels/{novelId}/outline", produces = MediaType.TEXT_EVENT_STREAM_VALUE)

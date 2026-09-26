@@ -1,5 +1,6 @@
 import { get, post, put, del } from './http';
 import type {
+  AiConfigVO,
   AuthResp,
   Chapter,
   ChapterMeta,
@@ -7,6 +8,7 @@ import type {
   Novel,
   NovelDetail,
   WorldVO,
+  WritingTaskVO,
 } from './types';
 
 export interface NovelSaveReq {
@@ -63,4 +65,24 @@ export const worldApi = {
 
 export const aiApi = {
   status: () => get<{ provider: string; model: string }>('/ai/status'),
+  getConfig: () => get<AiConfigVO>('/ai/config'),
+  saveConfig: (req: { provider: string; baseUrl?: string; apiKey?: string; model?: string }) =>
+    put<AiConfigVO>('/ai/config', req),
+  testConfig: () => get<{ ok: boolean; latencyMs: number; message: string }>('/ai/config/test'),
+};
+
+export interface AutoWriteReq {
+  mode: string;
+  chapters?: number;
+  wordsPerChapter?: number;
+  genOutline?: boolean;
+  autoSummary?: boolean;
+}
+
+export const taskApi = {
+  start: (novelId: number, req: AutoWriteReq) => post<WritingTaskVO>(`/novels/${novelId}/auto`, req),
+  list: (novelId: number) => get<WritingTaskVO[]>(`/novels/${novelId}/auto/tasks`),
+  get: (taskId: number) => get<WritingTaskVO>(`/tasks/${taskId}`),
+  approve: (taskId: number) => post<WritingTaskVO>(`/tasks/${taskId}/approve`),
+  cancel: (taskId: number) => post<WritingTaskVO>(`/tasks/${taskId}/cancel`),
 };

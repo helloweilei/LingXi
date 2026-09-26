@@ -22,6 +22,7 @@ public class MockLlmClient implements LlmClient {
         String full = switch (type) {
             case OUTLINE -> outline(ctx);
             case CONTINUE -> continueText(ctx);
+            case WRITE_CHAPTER -> writeChapter(ctx);
             case POLISH -> polish(ctx);
             case EXPAND -> expand(ctx);
             case CHAT -> chat(ctx);
@@ -74,6 +75,50 @@ public class MockLlmClient implements LlmClient {
                 【主题与卖点】
                 以%3$s的成长弧光为主线，兼顾爽感与悬念；%2$s题材的独有质感贯穿始终，每卷末设置高潮反转，保持追读黏性。
                 """, title, genre, lead);
+    }
+
+    private String writeChapter(AiContext ctx) {
+        String hero = (ctx.characterNames() == null || ctx.characterNames().isEmpty())
+                ? "他" : ctx.characterNames().get(0);
+        String title = blank(ctx.novelTitle()) ? "未命名新书" : ctx.novelTitle();
+        String genre = blank(ctx.genre()) ? "都市幻想" : ctx.genre();
+        return String.format("""
+                清晨的第一缕光穿过窗帘的缝隙，落在书桌边缘那盏还亮着的台灯上。%1$s揉了揉发酸的眉心，一夜未眠的疲惫仿佛在这一刻被光线照得无所遁形。
+
+                窗外的城市刚刚苏醒，远处传来早班车的汽笛声。%1$s的目光落回桌上摊开的笔记，那些字迹在灯下泛着微微的光，像是一道道还未解开的谜题。
+
+                “如果一切从一开始就是局呢？”
+
+                这个念头已经在%1$s脑中盘旋了一整夜。每一次试图抓住它，它便像水中的倒影一样散开，只留下更深一层的困惑。%1$s深吸一口气，将笔记合上，起身走向门口。
+
+                门打开的瞬间，走廊尽头传来一阵急促的脚步声。来人显然也没想到会与%1$s迎面相遇，脚步猛地一顿，脸上的表情在短短一秒内经历了惊讶、戒备，再到故作镇定。
+
+                “真巧。”对方先开了口，声音里带着一丝不易察觉的僵硬。
+
+                %1$s没有立刻回答，只是静静地看着对方，目光平静得近乎审视。半晌，%1$s才缓缓开口：“是巧，还是有人算准了我会在这个时间出门？”
+
+                对方的表情有一瞬间的松动。就在%1$s以为对方会否认时，对方却忽然笑了：“《%2$s》的主线已经开始了，%3$s题材的故事，从来都没有‘巧合’这两个字。”
+
+                话音落下的瞬间，走廊里的灯忽然闪烁了两下。%1$s的心脏猛地一跳——不是因为对方的这句话，而是因为%1$s突然想起，自己昨晚在笔记最后一页写下的那句话：
+
+                “不要相信任何主动接近你的人。”
+
+                而现在，站在面前的这个人，正是昨夜之前%1$s最信任的人之一。
+
+                “你……什么时候开始，连你也不可信了？”%1$s的声音有些发涩。
+
+                对方没有回答，只是伸手从怀里取出一封信，递到%1$s面前：“看完它，你就明白了。然后，决定要不要信我。”
+
+                信封上没有署名，只有一枚熟悉的火漆纹章。%1$s认得那枚纹章——那是十年前那个雨夜，%1$s亲眼看着它印在一封永远没有寄出去的信上。
+
+                手指触碰到信封的瞬间，%1$s忽然感到一阵寒意顺着脊椎爬上来，像是有什么沉睡已久的东西，正在这封信里缓缓睁开眼睛。
+
+                走廊尽头的窗户忽然被风吹开，风声呜呜作响，像是某种古老的警示。
+
+                而%1$s，还没有来得及打开那封信。
+
+                （本页为示例引擎生成的章节样张，接入真实模型后将按设定与大纲生成完整正文。）
+                """, hero, title, genre);
     }
 
     private String continueText(AiContext ctx) {

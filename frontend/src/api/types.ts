@@ -62,3 +62,29 @@ export interface ChatMsg {
   role: 'user' | 'assistant';
   content: string;
 }
+
+export interface AiConfigVO {
+  provider: string;
+  baseUrl: string;
+  model: string;
+  apiKeyMask: string;
+  hasKey: boolean;
+  updatedAt: string | null;
+}
+
+export interface WritingTaskVO {
+  id: number;
+  novelId: number;
+  mode: string;
+  status: string;
+  totalChapters: number;
+  currentChapter: number;
+  currentTitle: string;
+  chapters: number;
+  wordsPerChapter: number;
+  genOutline: boolean;
+  autoSummary: boolean;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+}

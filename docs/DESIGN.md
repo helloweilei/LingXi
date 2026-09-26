@@ -1,6 +1,6 @@
 # 灵犀创作 · 技术设计文档
 
-> 版本：v1.1 ｜ 日期：2026-09-26（P0/P1 改造：Flyway、章节版本/软删除、鉴权加固、记忆上下文）
+> 版本：v1.2 ｜ 日期：2026-09-26（P0/P1 工程化改造 + P2 用户级模型配置 / 自动创作流水线）
 
 ## 1. 总体架构
 
@@ -27,7 +27,7 @@
 | 状态/路由 | zustand（token/user 持久化）+ react-router 6 | 轻量全局状态 |
 | AI 消费 | 原生 fetch + ReadableStream 解析 SSE | 支持带 Authorization 的 POST 流式 |
 | 后端 | Spring Boot 3.3（Java 17），Maven 单模块 | spring-web(Servlet) + webflux 仅作 WebClient/Flux 能力 |
-| ORM | Spring Data JPA + Hibernate（运行时 `ddl-auto: none`） | 表结构由 **Flyway** 管理迁移（`db/migration/V1/V2`），已有库自动 baseline |
+| ORM | Spring Data JPA + Hibernate（运行时 `ddl-auto: none`） | 表结构由 **Flyway** 管理迁移（`db/migration/V1/V2/V3`），已有库自动 baseline |
 | 数据库 | 默认 H2（文件模式，零依赖开箱即用）；生产 MySQL 8 | `application-prod.yml` 切换 |
 | 鉴权 | JWT（jjwt 0.12，HS256）+ Spring Security 过滤器 | 无状态会话 |
 | AI | OpenAI 兼容 `/chat/completions`（stream=true），Mock 引擎兜底 | 供应商可配 |
@@ -46,11 +46,16 @@ ChapterSummary(id, novel_id FK, chapter_id FK UNIQUE, summary TEXT, updated_at) 
 StoryMemory(id, novel_id FK UNIQUE, story_brain TEXT, updated_at)                -- 故事脑
 NovelCharacter(id, novel_id FK, name, role, description, created_at)
 WorldSetting(id, novel_id FK, title, content TEXT, created_at)
+AiConfig(id, user_id FK UNIQUE, provider, base_url, api_key, model, updated_at)   -- 用户级模型配置
+WritingTask(id, novel_id FK, user_id FK, mode, status, params TEXT,
+            total_chapters, current_chapter, current_title, error, created_at, updated_at)  -- 自动创作任务
 ```
 
 - `Novel.word_count` 冗余汇总，在章节增/改/删（含软删/恢复/回滚）时增量维护，列表页零聚合查询。
 - 章节采用**软删除**（`deleted` 标记），正文与版本快照保留，可恢复；删除作品时级联清理版本/摘要/故事脑。
 - 章节内容/标题变更前自动快照到 `chapter_versions`（reason 记录 save/ai/restore），回滚版本前自动留档当前状态，保证可再回滚。
+- `ai_config` 每用户一份（user_id 唯一）：`provider=mock` 走内置示例引擎；`provider=openai` 时使用用户自填的 OpenAI 兼容配置（DeepSeek 等），**api_key 明文落库仅用于服务端转发，任何接口不回显完整 Key**（仅掩码）。
+- `writing_tasks.params` 存 JSON 创作意图：`{chapters, wordsPerChapter, genOutline, autoSummary}`；`status` 为状态机字段（见 5.5）。
 
 ## 4. 接口设计（统一返回 `{code, message, data}`，业务错误 code≠0）
 
@@ -72,13 +77,20 @@ WorldSetting(id, novel_id FK, title, content TEXT, created_at)
 | PUT/DELETE | /api/characters/{id} | 改 / 删 |
 | GET/POST | /api/novels/{id}/worldsettings | 世界观列表 / 新建 |
 | PUT/DELETE | /api/worldsettings/{id} | 改 / 删 |
-| GET | /api/ai/status | AI 供应商标识（mock/openai）与模型名 |
+| GET | /api/ai/status | AI 供应商标识与模型名（**按当前用户生效值**返回） |
 | POST | /api/ai/novels/{id}/outline | 流式生成全书大纲 |
 | POST | /api/ai/novels/{id}/chapters/{cid}/continue | 流式续写 |
 | POST | /api/ai/novels/{id}/polish | 流式润色 {text} |
 | POST | /api/ai/novels/{id}/expand | 流式扩写 {text} |
 | POST | /api/ai/novels/{id}/chat | 流式对话 {message, history[]} |
 | POST | /api/ai/novels/{id}/chapters/{cid}/summarize | 流式章节摘要（完成后自动落库覆盖） |
+| GET/PUT | /api/ai/config | 当前用户模型配置（回显掩码 Key）/ 保存 {provider,baseUrl,apiKey?,model} |
+| GET | /api/ai/config/test | 连通性测试（用已保存配置做一次最小对话，返回 ok/latency/message） |
+| POST | /api/novels/{id}/auto | 发起自动创作 {mode:AUTO\|CONFIRM, chapters, wordsPerChapter, genOutline, autoSummary} |
+| GET | /api/novels/{id}/auto/tasks | 该书近 20 条创作任务 |
+| GET | /api/tasks/{id} | 任务详情（前端轮询进度） |
+| POST | /api/tasks/{id}/approve | 批准继续（CONFIRM 模式 WAITING_APPROVAL 时） |
+| POST | /api/tasks/{id}/cancel | 取消任务 |
 
 **SSE 事件约定**：`event:delta data:<增量文本>`（多条）；`event:done`（正常结束）；`event:error data:<错误信息>`。前端 `fetch` + ReadableStream 解析（EventSource 不支持 POST/自定义头）。
 
@@ -99,13 +111,33 @@ WorldSetting(id, novel_id FK, title, content TEXT, created_at)
 
 `WebClient(bodyToFlux(String))` 解析上游 SSE → 转成 `Flux<ServerSentEvent>` 由 MVC（ReactiveTypeHandler）写回；上游异常映射为 `error` 事件；Mock 用 `delayElements` 模拟打字节奏。Nginx 反代需 `proxy_buffering off`。
 
-### 5.4 配置切换
+### 5.4 模型配置与生效解析
 
 ```
-lingxi.ai.provider: mock | openai   # mock 内置示例引擎
+lingxi.ai.provider: mock | openai   # mock 内置示例引擎（全局兜底）
 lingxi.ai.base-url / api-key / model / temperature
 spring.profiles.active: prod        # H2 → MySQL
 ```
+
+**用户级配置（P2 新增）**：`AiConfig`（每用户一份）存于 `ai_config` 表。`LlmClientProvider.forUser(user)` 按优先级解析生效客户端：
+
+1. 用户已配置 `provider=openai` 且填写了 API Key → 按用户配置按需实例化 `OpenAiCompatClient`（每个请求即时生效，无需重启）；
+2. 否则回退全局配置（`lingxi.ai.provider=openai` 时走全局真实模型）；
+3. 两者皆无 → Mock 示例引擎。
+
+`OpenAiCompatClient` 支持显式参数构造（baseUrl/apiKey/model/temperature/超时），全局 bean 与按用户实例共用同一套实现。`/api/ai/status` 与头部状态标签展示当前用户生效值。安全性：Key 仅服务端持有，前端只读掩码（`sk-ab****cdef`），测试连接通过已保存配置发起。
+
+### 5.5 自动创作流水线
+
+```
+状态机：QUEUED → RUNNING →（CONFIRM 模式每章后）WAITING_APPROVAL → RUNNING → … → DONE / FAILED / CANCELLED
+```
+
+- **入口**：`POST /api/novels/{id}/auto` 收集创作意图（模式 / 章节数 1-50 / 每章字数 300-5000 / 自动大纲 / 自动摘要），校验后建任务（QUEUED）提交到全局 2 线程守护执行池（`AutoWriteService`，@PreDestroy 优雅关闭）。
+- **执行**：每轮迭代前重读任务状态（支持取消）——（可选）先流式生成全书大纲写入作品；再逐章：`ChapterService.create` 建空章节 → `AiService.writeChapter`（新任务类型 `WRITE_CHAPTER`，整章正文）→ `ChapterService.save(reason=ai)` 落库（空→正文不产生快照）→ 可选 `summarize` 流式摘要落库；CONFIRM 模式每完成一章置 `WAITING_APPROVAL` 并退出执行线程，`approve` 后重新入池续跑。
+- **并发保护**：同一本书同时只允许一个进行中任务（QUEUED/RUNNING/WAITING_APPROVAL），重复发起返回 409；执行池串行化写入，避免章节 order 竞态。
+- **进度**：任务表持久化 `current_chapter/current_title/error`，前端 2.5s 轮询 `GET /api/tasks/{id}` 展示进度；失败记录错误信息，取消立即生效。
+- **Mock 兼容**：`WRITE_CHAPTER` 在 Mock 引擎产出整章示例正文，离线即可完整体验流水线（生成物带示例注水说明，接入真实模型后为正式内容）。
 
 ## 6. 部署架构
 

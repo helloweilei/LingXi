@@ -193,7 +193,7 @@ export default function NovelDetail() {
           {
             key: 'auto',
             label: '自动创作',
-            children: <AutoWritePanel novelId={novelId} />,
+            children: <AutoWritePanel novelId={novelId} onProgress={load} />,
           },
         ]}
       />

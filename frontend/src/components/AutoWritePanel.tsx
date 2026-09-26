@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Button,
@@ -31,11 +31,13 @@ const STATUS_TAG: Record<string, { color: string; text: string }> = {
 /**
  * 自动创作面板：收集创作意图（模式/章节数/每章字数/大纲/摘要）并发起任务；
  * 轮询展示任务进度；CONFIRM 模式下支持逐章批准继续。
+ * 任务进度变化时通过 onProgress 通知父页面刷新（如顶部字数统计）。
  */
-export default function AutoWritePanel({ novelId }: { novelId: number }) {
+export default function AutoWritePanel({ novelId, onProgress }: { novelId: number; onProgress?: () => void }) {
   const [form] = Form.useForm();
   const [tasks, setTasks] = useState<WritingTaskVO[]>([]);
   const [starting, setStarting] = useState(false);
+  const prevSigRef = useRef('');
 
   const activeCount = tasks.filter((t) =>
     ['QUEUED', 'RUNNING', 'WAITING_APPROVAL'].includes(t.status)
@@ -43,11 +45,17 @@ export default function AutoWritePanel({ novelId }: { novelId: number }) {
 
   const load = useCallback(async () => {
     try {
-      setTasks(await taskApi.list(novelId));
+      const list = await taskApi.list(novelId);
+      setTasks(list);
+      const sig = list.map((t) => `${t.id}:${t.status}:${t.currentChapter}`).join('|');
+      if (sig !== prevSigRef.current) {
+        prevSigRef.current = sig;
+        onProgress?.();
+      }
     } catch (e: any) {
       message.error(e?.message ?? '加载任务失败');
     }
-  }, [novelId]);
+  }, [novelId, onProgress]);
 
   useEffect(() => {
     load();

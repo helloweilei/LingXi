@@ -174,10 +174,12 @@ body {
   border-radius: 12px;
   box-shadow: 0 2px 16px rgba(60, 60, 90, 0.06);
   padding: 44px 56px;
-  font-family: 'Noto Serif SC', 'Source Han Serif SC', Georgia, 'SimSun', serif;
+  /* 番茄小说式阅读字体：无衬线细字，不加粗，行距适中 */
+  font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei', 'Segoe UI', sans-serif;
   font-size: 17px;
-  line-height: 2;
-  color: #2b2b33;
+  font-weight: 400;
+  line-height: 1.8;
+  color: #33333d;
 }
 .editor-textarea::placeholder {
   color: #b9b9c9;
@@ -194,8 +196,9 @@ body {
   overflow: auto;
   white-space: pre-wrap;
   font-size: 14px;
-  line-height: 1.9;
-  font-family: 'Noto Serif SC', Georgia, 'SimSun', serif;
+  line-height: 1.8;
+  font-weight: 400;
+  font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei', 'Segoe UI', sans-serif;
 }
 .ai-stream-box .cursor-blink {
   display: inline-block;

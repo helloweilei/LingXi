@@ -36,6 +36,10 @@ public class Chapter {
     @Column(name = "word_count", nullable = false)
     private Long wordCount = 0L;
 
+    /** 软删除标记：false=正常，true=已删除（正文与版本快照仍保留） */
+    @Column(nullable = false)
+    private boolean deleted = false;
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
@@ -95,6 +99,14 @@ public class Chapter {
 
     public void setWordCount(Long wordCount) {
         this.wordCount = wordCount;
+    }
+
+    public boolean isDeleted() {
+        return deleted;
+    }
+
+    public void setDeleted(boolean deleted) {
+        this.deleted = deleted;
     }
 
     public LocalDateTime getCreatedAt() {

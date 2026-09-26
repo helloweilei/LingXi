@@ -25,6 +25,7 @@ public class MockLlmClient implements LlmClient {
             case POLISH -> polish(ctx);
             case EXPAND -> expand(ctx);
             case CHAT -> chat(ctx);
+            case SUMMARIZE -> summarize(ctx);
         };
         List<String> chunks = new ArrayList<>();
         int i = 0;
@@ -144,6 +145,17 @@ public class MockLlmClient implements LlmClient {
 
                 把相关章节或人物设定发给我，我可以结合上下文给出更具体的方案。
                 """, q);
+    }
+
+    private String summarize(AiContext ctx) {
+        String src = blank(ctx.sourceText()) ? "本章尚无正文。" : ctx.sourceText().trim().replace("\n", " ");
+        String head = src.length() > 160 ? src.substring(0, 160) + "……" : src;
+        return String.format("""
+                【本章摘要（示例）】
+                %1$s
+
+                （Mock 引擎仅生成占位摘要；接入真实模型后，将基于正文自动产出 150-200 字的准确摘要。）
+                """, head);
     }
 
     private static boolean blank(String s) {

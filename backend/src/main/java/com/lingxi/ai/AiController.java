@@ -74,6 +74,14 @@ public class AiController {
         return toSse(aiService.chat(novelId, req, user));
     }
 
+    /** 生成章节摘要：流式输出，完成后自动写入该章的记忆（chapter_summaries） */
+    @PostMapping(value = "/novels/{novelId}/chapters/{chapterId}/summarize", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<ServerSentEvent<String>> summarize(@AuthenticationPrincipal User user,
+                                                   @PathVariable Long novelId,
+                                                   @PathVariable Long chapterId) {
+        return toSse(aiService.summarize(novelId, chapterId, user));
+    }
+
     private Flux<ServerSentEvent<String>> toSse(Flux<String> deltas) {
         return deltas.map(t -> ServerSentEvent.<String>builder(t).event("delta").build())
                 .concatWith(Mono.just(ServerSentEvent.<String>builder("").event("done").build()))

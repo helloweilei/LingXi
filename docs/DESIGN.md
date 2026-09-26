@@ -1,6 +1,6 @@
 # 灵犀创作 · 技术设计文档
 
-> 版本：v1.0 ｜ 日期：2026-09-22
+> 版本：v1.1 ｜ 日期：2026-09-26（P0/P1 改造：Flyway、章节版本/软删除、鉴权加固、记忆上下文）
 
 ## 1. 总体架构
 
@@ -27,7 +27,7 @@
 | 状态/路由 | zustand（token/user 持久化）+ react-router 6 | 轻量全局状态 |
 | AI 消费 | 原生 fetch + ReadableStream 解析 SSE | 支持带 Authorization 的 POST 流式 |
 | 后端 | Spring Boot 3.3（Java 17），Maven 单模块 | spring-web(Servlet) + webflux 仅作 WebClient/Flux 能力 |
-| ORM | Spring Data JPA + Hibernate（ddl-auto: update） | 小团队快速迭代；生产可换 Flyway |
+| ORM | Spring Data JPA + Hibernate（运行时 `ddl-auto: none`） | 表结构由 **Flyway** 管理迁移（`db/migration/V1/V2`），已有库自动 baseline |
 | 数据库 | 默认 H2（文件模式，零依赖开箱即用）；生产 MySQL 8 | `application-prod.yml` 切换 |
 | 鉴权 | JWT（jjwt 0.12，HS256）+ Spring Security 过滤器 | 无状态会话 |
 | AI | OpenAI 兼容 `/chat/completions`（stream=true），Mock 引擎兜底 | 供应商可配 |
@@ -38,13 +38,19 @@
 User(id, username UNIQUE, password, nickname, created_at)
 Novel(id, user_id FK, title, description, genre, status, target_words,
       word_count, outline TEXT, cover_color, created_at, updated_at)
-Chapter(id, novel_id FK, title, content TEXT, chapter_order, word_count, created_at, updated_at)
+Chapter(id, novel_id FK, title, content TEXT, chapter_order, word_count,
+        deleted BOOLEAN, created_at, updated_at)            -- 软删除
+ChapterVersion(id, chapter_id FK, version_no, title, content TEXT,
+               word_count, reason, created_at)             -- 章节快照（每章上限 50 版）
+ChapterSummary(id, novel_id FK, chapter_id FK UNIQUE, summary TEXT, updated_at)  -- 章节 AI 摘要
+StoryMemory(id, novel_id FK UNIQUE, story_brain TEXT, updated_at)                -- 故事脑
 NovelCharacter(id, novel_id FK, name, role, description, created_at)
 WorldSetting(id, novel_id FK, title, content TEXT, created_at)
 ```
 
-- `Novel.word_count` 冗余汇总，在章节增/改/删时增量维护，列表页零聚合查询。
-- 所有实体逻辑删除不引入（v1 直接物理删除，正文有自动保存兜底）。
+- `Novel.word_count` 冗余汇总，在章节增/改/删（含软删/恢复/回滚）时增量维护，列表页零聚合查询。
+- 章节采用**软删除**（`deleted` 标记），正文与版本快照保留，可恢复；删除作品时级联清理版本/摘要/故事脑。
+- 章节内容/标题变更前自动快照到 `chapter_versions`（reason 记录 save/ai/restore），回滚版本前自动留档当前状态，保证可再回滚。
 
 ## 4. 接口设计（统一返回 `{code, message, data}`，业务错误 code≠0）
 
@@ -56,7 +62,12 @@ WorldSetting(id, novel_id FK, title, content TEXT, created_at)
 | GET/POST | /api/novels | 我的作品列表 / 新建 |
 | GET/PUT/DELETE | /api/novels/{id} | 详情 / 更新（含大纲、状态）/ 删除 |
 | GET/POST | /api/novels/{id}/chapters | 章节列表（不含正文）/ 新建 |
-| GET/PUT/DELETE | /api/chapters/{id} | 章节正文读 / 保存 / 删 |
+| GET/PUT/DELETE | /api/chapters/{id} | 章节正文读 / 保存（SaveReq 支持 reason 标注快照来源）/ 软删 |
+| POST | /api/chapters/{id}/restore | 恢复已软删除章节 |
+| GET | /api/chapters/{id}/versions | 章节版本历史（不含正文） |
+| POST | /api/chapters/{id}/versions/{vid}/restore | 用指定快照回滚（回滚前自动留档） |
+| GET | /api/novels/{id}/memory | 全书记忆：按章序的章节摘要 + 故事脑 |
+| PUT | /api/novels/{id}/memory/story-brain | 覆盖更新故事脑 |
 | GET/POST | /api/novels/{id}/characters | 角色列表 / 新建 |
 | PUT/DELETE | /api/characters/{id} | 改 / 删 |
 | GET/POST | /api/novels/{id}/worldsettings | 世界观列表 / 新建 |
@@ -67,6 +78,7 @@ WorldSetting(id, novel_id FK, title, content TEXT, created_at)
 | POST | /api/ai/novels/{id}/polish | 流式润色 {text} |
 | POST | /api/ai/novels/{id}/expand | 流式扩写 {text} |
 | POST | /api/ai/novels/{id}/chat | 流式对话 {message, history[]} |
+| POST | /api/ai/novels/{id}/chapters/{cid}/summarize | 流式章节摘要（完成后自动落库覆盖） |
 
 **SSE 事件约定**：`event:delta data:<增量文本>`（多条）；`event:done`（正常结束）；`event:error data:<错误信息>`。前端 `fetch` + ReadableStream 解析（EventSource 不支持 POST/自定义头）。
 
@@ -74,12 +86,14 @@ WorldSetting(id, novel_id FK, title, content TEXT, created_at)
 
 ### 5.1 AI 上下文与提示词
 
-系统提示词固定为"中文网文创作助手"人设 + 结构化作品设定（书名/类型/简介/大纲/角色/世界观）；用户提示词按任务拼装（续写带上文尾部、润色带原文、对话带最近 10 轮历史）。Mock 引擎按任务类型 + 作品名/角色名生成示例文案，保证离线可演示。
+`ContextBuilder` 按 **Token 预算**（`lingxi.ai.context-budget-chars=8000`）打包上下文，优先级为：作品信息 → 一致性卡片（角色名册 + 世界观要点，纯规则生成）→ 大纲 → 故事脑 → 近期章节摘要（`max-recent-summaries=10`）；各段独立预算，超预算用"保头尾 + 中间省略"压缩。系统提示词固定为"中文网文创作助手"人设。Mock 引擎按任务类型 + 作品名/角色名生成示例文案，保证离线可演示。
 
 ### 5.2 鉴权与越权防护
 
 - JWT 过滤器解析后按 `username` 查库挂 SecurityContext；`/api/auth/**` 放行，其余全部认证。
 - 所有按 id 的资源访问统一走 `XxxService.load(id, currentUser)` 内做属主校验，不匹配一律 404，不泄露存在性。
+- **登录/注册失败限流**（进程内 `LoginRateLimiter`）：同一 key（用户名+IP；注册按 IP）15 分钟内失败 5 次锁定 15 分钟，返回 429；登录成功清零。多实例部署需换 Redis 等共享存储。
+- **生产密钥兜底**：`prod` profile 下 `JWT_SECRET` 未设置或使用默认密钥时拒绝启动（`JwtService` 抛 IllegalStateException），本地开发可用 `${LINGXI_JWT_SECRET:默认值}` 回退。
 
 ### 5.3 流式链路
 

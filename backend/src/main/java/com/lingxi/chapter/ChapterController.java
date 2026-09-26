@@ -3,6 +3,7 @@ package com.lingxi.chapter;
 import com.lingxi.chapter.dto.ChapterDtos.MetaVO;
 import com.lingxi.chapter.dto.ChapterDtos.SaveReq;
 import com.lingxi.chapter.dto.ChapterDtos.VO;
+import com.lingxi.chapter.dto.ChapterDtos.VersionVO;
 import com.lingxi.common.ApiResponse;
 import com.lingxi.user.User;
 import jakarta.validation.Valid;
@@ -52,5 +53,25 @@ public class ChapterController {
     public ApiResponse<Void> delete(@AuthenticationPrincipal User user, @PathVariable Long id) {
         chapterService.delete(id, user);
         return ApiResponse.ok();
+    }
+
+    /** 恢复已软删除的章节 */
+    @PostMapping("/api/chapters/{id}/restore")
+    public ApiResponse<Void> restore(@AuthenticationPrincipal User user, @PathVariable Long id) {
+        chapterService.restore(id, user);
+        return ApiResponse.ok();
+    }
+
+    /** 章节版本历史（不含正文内容，恢复时按版本号回滚） */
+    @GetMapping("/api/chapters/{id}/versions")
+    public ApiResponse<List<VersionVO>> versions(@AuthenticationPrincipal User user, @PathVariable Long id) {
+        return ApiResponse.ok(chapterService.versions(id, user));
+    }
+
+    /** 用指定快照恢复章节内容（恢复前自动留档当前状态） */
+    @PostMapping("/api/chapters/{id}/versions/{versionId}/restore")
+    public ApiResponse<VO> restoreVersion(@AuthenticationPrincipal User user, @PathVariable Long id,
+                                          @PathVariable Long versionId) {
+        return ApiResponse.ok(chapterService.restoreVersion(id, versionId, user));
     }
 }

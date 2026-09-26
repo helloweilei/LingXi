@@ -6,7 +6,8 @@ spring:
     password: ${MYSQL_PASSWORD:lingxi123}
   jpa:
     hibernate:
-      ddl-auto: update
+      # 表结构由 Flyway 管理（db/migration），Hibernate 不再自动改表
+      ddl-auto: none
   h2:
     console:
       enabled: false

@@ -1,8 +1,11 @@
 package com.lingxi.novel;
 
 import com.lingxi.chapter.ChapterRepository;
+import com.lingxi.chapter.ChapterVersionRepository;
 import com.lingxi.character.CharacterRepository;
 import com.lingxi.common.BizException;
+import com.lingxi.memory.ChapterSummaryRepository;
+import com.lingxi.memory.StoryMemoryRepository;
 import com.lingxi.novel.dto.NovelDtos.CreateReq;
 import com.lingxi.novel.dto.NovelDtos.DetailVO;
 import com.lingxi.novel.dto.NovelDtos.UpdateReq;
@@ -25,15 +28,23 @@ public class NovelService {
 
     private final NovelRepository novelRepository;
     private final ChapterRepository chapterRepository;
+    private final ChapterVersionRepository chapterVersionRepository;
     private final CharacterRepository characterRepository;
     private final WorldSettingRepository worldSettingRepository;
+    private final ChapterSummaryRepository chapterSummaryRepository;
+    private final StoryMemoryRepository storyMemoryRepository;
 
     public NovelService(NovelRepository novelRepository, ChapterRepository chapterRepository,
-                        CharacterRepository characterRepository, WorldSettingRepository worldSettingRepository) {
+                        ChapterVersionRepository chapterVersionRepository,
+                        CharacterRepository characterRepository, WorldSettingRepository worldSettingRepository,
+                        ChapterSummaryRepository chapterSummaryRepository, StoryMemoryRepository storyMemoryRepository) {
         this.novelRepository = novelRepository;
         this.chapterRepository = chapterRepository;
+        this.chapterVersionRepository = chapterVersionRepository;
         this.characterRepository = characterRepository;
         this.worldSettingRepository = worldSettingRepository;
+        this.chapterSummaryRepository = chapterSummaryRepository;
+        this.storyMemoryRepository = storyMemoryRepository;
     }
 
     public List<VO> list(User user) {
@@ -58,7 +69,7 @@ public class NovelService {
 
     public DetailVO detail(Long novelId, User user) {
         Novel novel = loadOwned(novelId, user);
-        return toDetailVO(novel, chapterRepository.countByNovelId(novelId));
+        return toDetailVO(novel, chapterRepository.countByNovelIdAndDeletedFalse(novelId));
     }
 
     @Transactional
@@ -85,15 +96,21 @@ public class NovelService {
         if (req.outline() != null) {
             novel.setOutline(req.outline());
         }
-        return toDetailVO(novel, chapterRepository.countByNovelId(novelId));
+        return toDetailVO(novel, chapterRepository.countByNovelIdAndDeletedFalse(novelId));
     }
 
     @Transactional
     public void delete(Long novelId, User user) {
         Novel novel = loadOwned(novelId, user);
+        List<Long> chapterIds = chapterRepository.findIdsByNovelId(novelId);
         chapterRepository.deleteByNovelId(novelId);
+        if (!chapterIds.isEmpty()) {
+            chapterVersionRepository.deleteByChapterIdIn(chapterIds);
+        }
         characterRepository.deleteByNovelId(novelId);
         worldSettingRepository.deleteByNovelId(novelId);
+        chapterSummaryRepository.deleteByNovelId(novelId);
+        storyMemoryRepository.deleteByNovelId(novelId);
         novelRepository.delete(novel);
     }
 

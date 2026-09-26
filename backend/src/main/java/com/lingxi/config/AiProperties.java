@@ -13,6 +13,10 @@ public class AiProperties {
     private double temperature = 0.8;
     private int connectTimeoutSeconds = 15;
     private int readTimeoutSeconds = 180;
+    /** 上下文预算（字符，中文约 1 字 ≈ 1 token）：设定/大纲/记忆按优先级打包 */
+    private int contextBudgetChars = 8000;
+    /** 注入的最近章节摘要条数 */
+    private int maxRecentSummaries = 10;
 
     public boolean isRealLlm() {
         return "openai".equalsIgnoreCase(provider) && apiKey != null && !apiKey.isBlank();
@@ -72,5 +76,21 @@ public class AiProperties {
 
     public void setReadTimeoutSeconds(int readTimeoutSeconds) {
         this.readTimeoutSeconds = readTimeoutSeconds;
+    }
+
+    public int getContextBudgetChars() {
+        return contextBudgetChars;
+    }
+
+    public void setContextBudgetChars(int contextBudgetChars) {
+        this.contextBudgetChars = contextBudgetChars;
+    }
+
+    public int getMaxRecentSummaries() {
+        return maxRecentSummaries;
+    }
+
+    public void setMaxRecentSummaries(int maxRecentSummaries) {
+        this.maxRecentSummaries = maxRecentSummaries;
     }
 }

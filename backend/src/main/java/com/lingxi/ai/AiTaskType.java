@@ -5,5 +5,6 @@ public enum AiTaskType {
     CONTINUE,
     POLISH,
     EXPAND,
-    CHAT
+    CHAT,
+    SUMMARIZE
 }

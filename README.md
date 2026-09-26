@@ -11,9 +11,12 @@
 - 📝 **章节写作**：沉浸式编辑器，自动保存（防抖 2.5s）+ Ctrl+S，实时字数统计
 - 👤 **设定库**：角色设定（主角/配角/反派）与世界观条目，AI 写作时自动注入上下文
 - 🧭 **全书大纲**：手动编写或 AI 一键生成，支持分卷 + 章节梗概结构
+- 🕘 **章节版本历史与回滚**：每次内容/标题变更自动生成快照（每章最多保留 50 版），章节支持软删除与恢复，可一键回滚到任意历史版本（回滚前自动留档）
+- 🧠 **记忆上下文**：章节 AI 摘要自动沉淀 + 可维护的"故事脑"全书设定；AI 写作时按 Token 预算注入近期摘要与一致性卡片，长书不丢设定
 - 🤖 **AI 能力**（全部 SSE 流式输出，可中途停止，确认后才写入正文）：
   - **AI 续写**：结合全书设定、上一章结尾与本章已有内容，从光标处续写
   - **AI 润色 / 扩写**：选中文字即可改写，确认后替换所选内容
+  - **AI 摘要**：为指定章节流式生成 150-200 字摘要，自动写入记忆库
   - **AI 助手**：结合作品上下文的多轮创作对话
 - 🔌 **AI 供应商可替换**：内置离线示例引擎（Mock，无需任何 Key 即可体验全流程）；一行配置切换到任意 OpenAI 兼容接口（DeepSeek / 通义 / Kimi / OpenAI…）
 
@@ -23,7 +26,7 @@
 | --- | --- |
 | 前端 | React 18 + TypeScript + Vite 5 + Ant Design 5 + zustand |
 | 后端 | Spring Boot 3.3（Java 17）+ Spring Security + JPA + WebClient（SSE 流式） |
-| 数据库 | 默认 H2（文件模式，零配置）；生产 MySQL 8（`prod` profile） |
+| 数据库 | 默认 H2（文件模式，零配置）；生产 MySQL 8（`prod` profile）。表结构由 **Flyway 管理迁移**（V1 初始表 + V2 版本/记忆表） |
 | 部署 | Docker Compose（Nginx + Spring Boot + MySQL） |
 
 详细设计见 [docs/PRD.md](docs/PRD.md) 与 [docs/DESIGN.md](docs/DESIGN.md)。
@@ -73,6 +76,9 @@ Docker 部署时在 `docker-compose.yml` 中设置 `LINGXI_AI_PROVIDER=openai`�
 
 ## 生产安全清单
 
-- [ ] 修改 `lingxi.jwt.secret` 为足够长的随机串
+- [ ] 设置环境变量 `LINGXI_JWT_SECRET` 为足够长的随机串（**必填**：`prod` profile 下未设置或使用默认密钥时后端将拒绝启动，本地开发可用默认值）
 - [ ] 修改 MySQL 密码（compose 与 `application-prod.yml` 保持一致）
 - [ ] 如需公网访问，为 Nginx 配置 HTTPS
+- [ ] 登录接口已内置失败限流（15 分钟内 5 次失败锁定 15 分钟）；如需更高防护可在网关层叠加
+
+> CI：GitHub Actions（`.github/workflows/ci.yml`）在 push/PR 时自动执行后端 `mvn test` 与前端 `npm run build`。

@@ -40,8 +40,9 @@ docker compose down -v         # 停止并清空数据
 | LINGXI_AI_BASE_URL | OpenAI 兼容接口地址 | https://api.deepseek.com/v1 |
 | LINGXI_AI_API_KEY | API Key | 空（mock） |
 | LINGXI_AI_MODEL | 模型名 | deepseek-chat |
+| LINGXI_JWT_SECRET | **JWT 签名密钥（prod 必填）**：未设置或使用默认值时后端拒绝启动 | 默认值仅限本地开发 |
 
-> JWT 密钥默认取 `application.yml` 中的值，生产环境建议在 backend 容器追加环境变量 `LINGXI_JWT_SECRET=<64位随机串>` 覆盖。
+> `LINGXI_JWT_SECRET` 必须设置为足够长的随机串（如 64 位），生产环境缺失或使用默认密钥会直接启动失败（安全兜底），请勿在生产使用默认值。
 
 ## 三、传统部署（物理机 / 虚机）
 
@@ -72,7 +73,10 @@ Nginx 站点配置参考 `frontend/nginx.conf`（将 `proxy_pass http://backend:
 
 ## 四、数据库说明
 
-- 表结构由 Hibernate `ddl-auto: update` 自动创建/增量更新，首次启动即完成建表。
+- 表结构由 **Flyway** 管理（`spring.flyway.*` + `ddl-auto: none`），应用启动时自动执行 `classpath:db/migration/` 下的迁移脚本：
+  - `V1__init.sql`：基础五表（users / novels / chapters / novel_characters / world_settings）
+  - `V2__memory_and_versions.sql`：章节软删除列 + 版本快照 / 章节摘要 / 故事脑三张新表
+- **已有旧库升级**：Flyway 以 `baseline-on-migrate=true` 自动基线到 V1，只增量执行 V2，无需手工干预；升级脚本一律新增 `Vn__*.sql`，禁止修改已执行脚本。
 - H2 开发库位于 `backend/data/lingxi.mv.db`，删除该文件即重置数据。
 - 生产 MySQL 建议定期 `mysqldump` 备份 `lingxi` 库；Docker 数据卷 `mysql-data` 即全部数据。
 
@@ -83,7 +87,7 @@ git pull
 docker compose up -d --build   # 重新构建镜像并滚动替换
 ```
 
-回滚：`git checkout <上一版本号>` 后重新执行上面的构建命令（数据卷不受影响）。
+数据库结构升级由 Flyway 启动时自动迁移（新增 `Vn__*.sql` 后无需手工执行）。回滚：`git checkout <上一版本号>` 后重新执行上面的构建命令（数据卷不受影响；如新迁移已执行过，回滚旧代码前注意迁移脚本不可回滚）。
 
 ## 六、常见问题
 

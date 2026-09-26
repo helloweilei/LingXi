@@ -9,14 +9,21 @@ import java.util.Optional;
 
 public interface ChapterRepository extends JpaRepository<Chapter, Long> {
 
-    List<Chapter> findByNovelIdOrderByChapterOrderAscIdAsc(Long novelId);
+    List<Chapter> findByNovelIdAndDeletedFalseOrderByChapterOrderAscIdAsc(Long novelId);
 
-    Optional<Chapter> findTopByNovelIdOrderByChapterOrderDesc(Long novelId);
+    Optional<Chapter> findTopByNovelIdAndDeletedFalseOrderByChapterOrderDesc(Long novelId);
 
-    long countByNovelId(Long novelId);
+    /** 上一章（同书、未删除、序号更小）的最近一条，LIMIT 1，避免全表加载 */
+    Optional<Chapter> findFirstByNovelIdAndDeletedFalseAndChapterOrderLessThanOrderByChapterOrderDescIdDesc(
+            Long novelId, Integer chapterOrder);
+
+    long countByNovelIdAndDeletedFalse(Long novelId);
 
     void deleteByNovelId(Long novelId);
 
-    @Query("select c.novelId, count(c) from Chapter c where c.novelId in :novelIds group by c.novelId")
+    @Query("select c.novelId, count(c) from Chapter c where c.novelId in :novelIds and c.deleted = false group by c.novelId")
     List<Object[]> countGroupedByNovelId(@Param("novelIds") List<Long> novelIds);
+
+    @Query("select c.id from Chapter c where c.novelId = :novelId")
+    List<Long> findIdsByNovelId(@Param("novelId") Long novelId);
 }

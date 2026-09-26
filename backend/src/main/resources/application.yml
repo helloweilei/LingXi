@@ -13,16 +13,23 @@ spring:
     password: ""
   jpa:
     hibernate:
-      ddl-auto: update
+      # 表结构由 Flyway 管理（db/migration），Hibernate 不再自动改表
+      ddl-auto: none
     open-in-view: false
+  flyway:
+    enabled: true
+    # 已有库（Hibernate 历史建表）自动基线到 V1，新库直接跑全量迁移
+    baseline-on-migrate: true
+    baseline-version: 1
+    locations: classpath:db/migration
   h2:
     console:
       enabled: true
 
 lingxi:
   jwt:
-    # HS256 密钥，生产环境务必修改为足够长的随机串
-    secret: lingxi-creation-jwt-secret-2026-please-change-me-0123456789abcdef
+    # HS256 密钥：优先取环境变量 LINGXI_JWT_SECRET；生产环境（prod profile）使用默认值将拒绝启动
+    secret: ${LINGXI_JWT_SECRET:lingxi-creation-jwt-secret-2026-please-change-me-0123456789abcdef}
     expire-hours: 72
   ai:
     # mock = 内置离线示例引擎（无需 API Key）；openai = 任意 OpenAI 兼容接口（DeepSeek/通义/Kimi 等）
@@ -33,6 +40,10 @@ lingxi:
     temperature: 0.8
     connect-timeout-seconds: 15
     read-timeout-seconds: 180
+    # 上下文预算（字符，中文约 1 字 ≈ 1 token）：设定/大纲/记忆按优先级打包，超出部分截断
+    context-budget-chars: 8000
+    # 注入的最近章节摘要条数
+    max-recent-summaries: 10
 
 logging:
   level:

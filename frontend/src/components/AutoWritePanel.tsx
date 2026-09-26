@@ -6,6 +6,7 @@ import {
   Col,
   Form,
   InputNumber,
+  Popconfirm,
   Progress,
   Radio,
   Row,
@@ -15,7 +16,7 @@ import {
   Tag,
   message,
 } from 'antd';
-import { PauseCircleOutlined, PlayCircleOutlined, RobotOutlined } from '@ant-design/icons';
+import { DeleteOutlined, PauseCircleOutlined, PlayCircleOutlined, RobotOutlined } from '@ant-design/icons';
 import { taskApi } from '../api';
 import type { WritingTaskVO } from '../api/types';
 
@@ -108,6 +109,16 @@ export default function AutoWritePanel({ novelId, onProgress }: { novelId: numbe
       load();
     } catch (e: any) {
       message.error(e?.message ?? '取消失败');
+    }
+  };
+
+  const remove = async (id: number) => {
+    try {
+      await taskApi.remove(id);
+      message.success('任务已删除，生成内容已移除');
+      load();
+    } catch (e: any) {
+      message.error(e?.message ?? '删除失败');
     }
   };
 
@@ -228,6 +239,19 @@ export default function AutoWritePanel({ novelId, onProgress }: { novelId: numbe
                   <Button type="link" size="small" danger icon={<PauseCircleOutlined />} onClick={() => cancel(r.id)}>
                     取消
                   </Button>
+                )}
+                {!['QUEUED', 'RUNNING', 'WAITING_APPROVAL'].includes(r.status) && (
+                  <Popconfirm
+                    title="删除任务并移除生成的内容？"
+                    description="将删除该任务创建的章节与摘要；若任务生成过全书大纲，大纲也会被清空。章节正文与历史版本会保留（软删除），后续可恢复。"
+                    okText="删除"
+                    okButtonProps={{ danger: true }}
+                    onConfirm={() => remove(r.id)}
+                  >
+                    <Button type="link" size="small" danger icon={<DeleteOutlined />}>
+                      删除
+                    </Button>
+                  </Popconfirm>
                 )}
                 {r.status === 'FAILED' && r.error && <span className="muted" style={{ fontSize: 12 }}>{r.error}</span>}
               </Space>

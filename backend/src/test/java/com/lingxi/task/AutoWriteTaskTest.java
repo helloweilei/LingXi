@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -37,5 +38,23 @@ class AutoWriteTaskTest {
         assertEquals(1500, back.wordsPerChapter());
         assertTrue(back.genOutline());
         assertEquals(false, back.autoSummary());
+    }
+
+    @Test
+    void onlyTerminalTasksCanBeRemoved() {
+        assertTrue(AutoWriteService.isTerminal(WritingTaskStatus.DONE));
+        assertTrue(AutoWriteService.isTerminal(WritingTaskStatus.FAILED));
+        assertTrue(AutoWriteService.isTerminal(WritingTaskStatus.CANCELLED));
+        assertFalse(AutoWriteService.isTerminal(WritingTaskStatus.QUEUED));
+        assertFalse(AutoWriteService.isTerminal(WritingTaskStatus.RUNNING));
+        assertFalse(AutoWriteService.isTerminal(WritingTaskStatus.WAITING_APPROVAL));
+    }
+
+    @Test
+    void createdChaptersCsvParsesToIds() {
+        assertEquals(List.of(1L, 2L, 3L), AutoWriteService.parseIds("1, 2 ,3"));
+        assertEquals(List.of(7L), AutoWriteService.parseIds("7"));
+        assertTrue(AutoWriteService.parseIds("").isEmpty());
+        assertTrue(AutoWriteService.parseIds(null).isEmpty());
     }
 }

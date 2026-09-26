@@ -6,6 +6,7 @@ import com.lingxi.ai.AiService;
 import com.lingxi.chapter.ChapterService;
 import com.lingxi.chapter.dto.ChapterDtos.SaveReq;
 import com.lingxi.common.BizException;
+import com.lingxi.memory.ChapterSummaryRepository;
 import com.lingxi.novel.Novel;
 import com.lingxi.novel.NovelService;
 import com.lingxi.novel.dto.NovelDtos.UpdateReq;
@@ -16,9 +17,11 @@ import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import reactor.core.publisher.Flux;
 
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -42,6 +45,7 @@ public class AutoWriteService {
     private final NovelService novelService;
     private final ChapterService chapterService;
     private final AiService aiService;
+    private final ChapterSummaryRepository chapterSummaryRepository;
     private final ObjectMapper objectMapper;
 
     /** 全局串行执行池（2 线程）：任务在池内排队执行，天然避免同一本书并发写冲突 */
@@ -52,11 +56,13 @@ public class AutoWriteService {
     });
 
     public AutoWriteService(WritingTaskRepository taskRepository, NovelService novelService,
-                            ChapterService chapterService, AiService aiService, ObjectMapper objectMapper) {
+                            ChapterService chapterService, AiService aiService,
+                            ChapterSummaryRepository chapterSummaryRepository, ObjectMapper objectMapper) {
         this.taskRepository = taskRepository;
         this.novelService = novelService;
         this.chapterService = chapterService;
         this.aiService = aiService;
+        this.chapterSummaryRepository = chapterSummaryRepository;
         this.objectMapper = objectMapper;
     }
 
@@ -119,6 +125,32 @@ public class AutoWriteService {
         return toVO(task);
     }
 
+    /**
+     * 删除任务并移除其生成的内容：
+     * 1. 软删本任务创建的章节（正文与版本快照保留，可恢复）；
+     * 2. 清理这些章节的 AI 摘要；
+     * 3. 若本任务实际生成过全书大纲，则清空大纲（旧大纲在生成时已被覆盖，无法还原）。
+     * 仅终态（DONE/FAILED/CANCELLED）任务允许删除。
+     */
+    @Transactional
+    public void remove(Long taskId, User user) {
+        WritingTask task = loadOwned(taskId, user);
+        if (ACTIVE.contains(task.getStatus())) {
+            throw new BizException(400, "任务进行中，请先取消再删除", 400);
+        }
+        for (Long cid : parseIds(task.getCreatedChapters())) {
+            chapterService.delete(cid, user);
+            chapterSummaryRepository.deleteByChapterId(cid);
+        }
+        if (Boolean.TRUE.equals(task.getGeneratedOutline())) {
+            Novel novel = novelService.loadOwned(task.getNovelId(), user);
+            if (novel.getOutline() != null && !novel.getOutline().isBlank()) {
+                novelService.update(novel.getId(), user, new UpdateReq(null, null, null, null, null, null, ""));
+            }
+        }
+        taskRepository.delete(task);
+    }
+
     public TaskVO get(Long taskId, User user) {
         return toVO(loadOwned(taskId, user));
     }
@@ -149,6 +181,8 @@ public class AutoWriteService {
                 if (!outline.isBlank()) {
                     novelService.update(novel.getId(), user,
                             new UpdateReq(null, null, null, null, null, null, outline));
+                    task.setGeneratedOutline(true);
+                    taskRepository.save(task);
                 }
             }
 
@@ -156,6 +190,8 @@ public class AutoWriteService {
             while (task.getCurrentChapter() < task.getTotalChapters() && isActive(task.getId())) {
                 int next = task.getCurrentChapter() + 1;
                 var ch = chapterService.create(novel.getId(), user, new SaveReq(null, null, null));
+                appendCreatedChapter(task, ch.id());
+                taskRepository.save(task); // 先记录章节归属：中途失败也能被删除任务清理
                 String content = collect(aiService.writeChapter(novel.getId(), ch.id(), p.wordsPerChapter, user));
                 if (content.isBlank()) {
                     throw new BizException(502, "AI 未生成正文（第 " + next + " 章）", 502);
@@ -197,6 +233,28 @@ public class AutoWriteService {
         return taskRepository.findById(taskId)
                 .map(t -> t.getStatus() == WritingTaskStatus.RUNNING || t.getStatus() == WritingTaskStatus.QUEUED)
                 .orElse(false);
+    }
+
+    private void appendCreatedChapter(WritingTask task, Long chapterId) {
+        String cur = task.getCreatedChapters();
+        task.setCreatedChapters(cur == null || cur.isBlank() ? String.valueOf(chapterId) : cur + "," + chapterId);
+    }
+
+    /** 终态（可删除）判定 */
+    static boolean isTerminal(WritingTaskStatus status) {
+        return !ACTIVE.contains(status);
+    }
+
+    /** 解析逗号分隔的章节 id 列表 */
+    static List<Long> parseIds(String csv) {
+        if (csv == null || csv.isBlank()) {
+            return List.of();
+        }
+        return Arrays.stream(csv.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .map(Long::valueOf)
+                .toList();
     }
 
     private WritingTask loadOwned(Long taskId, User user) {

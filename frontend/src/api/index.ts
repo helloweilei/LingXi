@@ -85,4 +85,5 @@ export const taskApi = {
   get: (taskId: number) => get<WritingTaskVO>(`/tasks/${taskId}`),
   approve: (taskId: number) => post<WritingTaskVO>(`/tasks/${taskId}/approve`),
   cancel: (taskId: number) => post<WritingTaskVO>(`/tasks/${taskId}/cancel`),
+  remove: (taskId: number) => del(`/tasks/${taskId}`),
 };

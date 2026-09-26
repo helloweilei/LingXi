@@ -6,6 +6,7 @@ import com.lingxi.task.dto.WritingTaskDtos.TaskVO;
 import com.lingxi.user.User;
 import jakarta.validation.Valid;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -54,5 +55,12 @@ public class WritingTaskController {
     @PostMapping("/tasks/{taskId}/cancel")
     public ApiResponse<TaskVO> cancel(@AuthenticationPrincipal User user, @PathVariable Long taskId) {
         return ApiResponse.ok(autoWriteService.cancel(taskId, user));
+    }
+
+    /** 删除任务并移除其生成的内容（仅终态任务；章节软删可恢复，生成的大纲会清空） */
+    @DeleteMapping("/tasks/{taskId}")
+    public ApiResponse<Void> remove(@AuthenticationPrincipal User user, @PathVariable Long taskId) {
+        autoWriteService.remove(taskId, user);
+        return ApiResponse.ok();
     }
 }

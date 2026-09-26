@@ -52,6 +52,14 @@ public class WritingTask {
     @Column(name = "current_title", nullable = false, length = 120)
     private String currentTitle = "";
 
+    /** 本任务创建的章节 id（逗号分隔），删除任务时据此移除生成内容 */
+    @Column(name = "created_chapters", nullable = false, length = 1000)
+    private String createdChapters = "";
+
+    /** 本任务是否实际生成过全书大纲（生成过才允许删除时清空大纲） */
+    @Column(name = "generated_outline", nullable = false)
+    private Boolean generatedOutline = false;
+
     @Lob
     @Column
     private String error;
@@ -140,6 +148,22 @@ public class WritingTask {
 
     public void setCurrentTitle(String currentTitle) {
         this.currentTitle = currentTitle;
+    }
+
+    public String getCreatedChapters() {
+        return createdChapters;
+    }
+
+    public void setCreatedChapters(String createdChapters) {
+        this.createdChapters = createdChapters == null ? "" : createdChapters;
+    }
+
+    public Boolean getGeneratedOutline() {
+        return generatedOutline;
+    }
+
+    public void setGeneratedOutline(Boolean generatedOutline) {
+        this.generatedOutline = generatedOutline;
     }
 
     public String getError() {

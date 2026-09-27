@@ -25,16 +25,17 @@ public final class NovelDtos {
             @Size(max = 20) String status,
             Integer targetWords,
             String coverColor,
+            @Size(max = 500) String coverUrl,
             @Size(max = 30000) String outline) {
     }
 
     public record VO(Long id, String title, String description, String genre, String status,
-                     Integer targetWords, Long wordCount, String coverColor, Long chapterCount,
+                     Integer targetWords, Long wordCount, String coverColor, String coverUrl, Long chapterCount,
                      LocalDateTime createdAt, LocalDateTime updatedAt) {
     }
 
     public record DetailVO(Long id, String title, String description, String genre, String status,
-                           Integer targetWords, Long wordCount, String coverColor, String outline,
+                           Integer targetWords, Long wordCount, String coverColor, String coverUrl, String outline,
                            Long chapterCount, LocalDateTime createdAt, LocalDateTime updatedAt) {
     }
 }

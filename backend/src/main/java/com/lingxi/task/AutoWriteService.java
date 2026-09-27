@@ -150,7 +150,7 @@ public class AutoWriteService {
         if (Boolean.TRUE.equals(task.getGeneratedOutline())) {
             Novel novel = novelService.loadOwned(task.getNovelId(), user);
             if (novel.getOutline() != null && !novel.getOutline().isBlank()) {
-                novelService.update(novel.getId(), user, new UpdateReq(null, null, null, null, null, null, ""));
+                novelService.update(novel.getId(), user, new UpdateReq(null, null, null, null, null, null, null, ""));
             }
         }
         taskRepository.delete(task);
@@ -188,7 +188,7 @@ public class AutoWriteService {
                 String outline = collect(aiService.outline(novel.getId(), user));
                 if (!outline.isBlank()) {
                     novelService.update(novel.getId(), user,
-                            new UpdateReq(null, null, null, null, null, null, outline));
+                            new UpdateReq(null, null, null, null, null, null, null, outline));
                     task.setGeneratedOutline(true);
                     saveTask(task);
                 }

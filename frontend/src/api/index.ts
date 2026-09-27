@@ -18,6 +18,7 @@ export interface NovelSaveReq {
   status?: string;
   targetWords?: number | null;
   coverColor?: string;
+  coverUrl?: string | null;
   outline?: string;
 }
 
@@ -70,6 +71,15 @@ export const aiApi = {
   saveConfig: (req: { provider: string; baseUrl?: string; apiKey?: string; model?: string }) =>
     put<AiConfigVO>('/ai/config', req),
   testConfig: () => get<{ ok: boolean; latencyMs: number; message: string }>('/ai/config/test'),
+};
+
+export const uploadApi = {
+  /** 上传图片（封面等），返回静态资源路径 */
+  upload: (file: File) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    return post<{ url: string }>('/upload', fd);
+  },
 };
 
 export interface AutoWriteReq {

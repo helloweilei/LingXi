@@ -18,6 +18,7 @@ export interface Novel {
   targetWords: number | null;
   wordCount: number;
   coverColor: string;
+  coverUrl: string | null;
   chapterCount: number;
   createdAt: string;
   updatedAt: string;

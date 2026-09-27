@@ -6,6 +6,10 @@ spring:
     name: lingxi-backend
   main:
     web-application-type: servlet
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 6MB
   datasource:
     url: jdbc:h2:file:./data/lingxi;MODE=MySQL
     driver-class-name: org.h2.Driver

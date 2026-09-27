@@ -17,6 +17,7 @@ import {
   Table,
   Tabs,
   Tag,
+  Upload,
   message,
 } from "antd";
 import {
@@ -27,10 +28,11 @@ import {
   PlusOutlined,
   RobotOutlined,
   SaveOutlined,
+  UploadOutlined,
 } from "@ant-design/icons";
 import { useNavigate, useParams } from "react-router-dom";
 import dayjs from "dayjs";
-import { chapterApi, characterApi, novelApi, worldApi } from "../api";
+import { chapterApi, characterApi, novelApi, uploadApi, worldApi } from "../api";
 import { streamSse } from "../api/ai";
 import type {
   ChapterMeta,
@@ -64,6 +66,7 @@ export default function NovelDetail() {
   const [tab, setTab] = useState("chapters");
   const [editOpen, setEditOpen] = useState(false);
   const [outlineOpen, setOutlineOpen] = useState(false);
+  const [coverOpen, setCoverOpen] = useState(false);
   const [outline, setOutline] = useState("");
   const [chapterRefresh, setChapterRefresh] = useState(0);
 
@@ -120,10 +123,9 @@ export default function NovelDetail() {
       </Button>
 
       <div className="section-card" style={{ marginBottom: 20 }}>
-        <div
-          style={{ display: "flex", justifyContent: "space-between", gap: 20 }}
-        >
-          <div style={{ flex: 1 }}>
+        <div style={{ display: "flex", gap: 20, alignItems: "flex-start" }}>
+          <CoverBox novel={novel} onClick={() => setCoverOpen(true)} />
+          <div style={{ flex: 1, minWidth: 0 }}>
             <Space size={10} align="center" wrap>
               <h2 style={{ margin: 0 }}>{novel.title}</h2>
               {(novel.genre ?? "")
@@ -291,6 +293,16 @@ export default function NovelDetail() {
           message.success("已保存");
         }}
       />
+      <CoverModal
+        open={coverOpen}
+        novel={novel}
+        onClose={() => setCoverOpen(false)}
+        onSaved={(n) => {
+          setNovel((prev) => (prev ? { ...prev, ...n } : n));
+          setCoverOpen(false);
+          message.success("封面已更新");
+        }}
+      />
       <AiDrawer
         open={outlineOpen}
         onClose={() => setOutlineOpen(false)}
@@ -307,6 +319,173 @@ export default function NovelDetail() {
 }
 
 /* ---------------- 章节 ---------------- */
+
+/** 详情页左侧封面：有图显示图片，无图用主题色 + 书名首字占位；点击进入设置 */
+function CoverBox({ novel, onClick }: { novel: NovelDetail; onClick: () => void }) {
+  const bg = novel.coverColor || "#6a5acd";
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        width: 132,
+        height: 176,
+        borderRadius: 10,
+        overflow: "hidden",
+        cursor: "pointer",
+        position: "relative",
+        flex: "0 0 auto",
+        background: bg,
+        boxShadow: "0 4px 12px rgba(0,0,0,.18)",
+      }}
+    >
+      {novel.coverUrl ? (
+        <img
+          src={novel.coverUrl}
+          alt="封面"
+          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+        />
+      ) : (
+        <div
+          style={{
+            height: "100%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "#fff",
+            fontSize: 46,
+            fontWeight: 700,
+          }}
+        >
+          {novel.title.slice(0, 1)}
+        </div>
+      )}
+      <div
+        style={{
+          position: "absolute",
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: "rgba(0,0,0,.5)",
+          color: "#fff",
+          textAlign: "center",
+          fontSize: 12,
+          padding: "5px 0",
+        }}
+      >
+        设置封面
+      </div>
+    </div>
+  );
+}
+
+/** 设置封面弹窗：上传图片 / 移除封面 */
+function CoverModal({
+  open,
+  novel,
+  onClose,
+  onSaved,
+}: {
+  open: boolean;
+  novel: NovelDetail;
+  onClose: () => void;
+  onSaved: (n: NovelDetail) => void;
+}) {
+  const [coverUrl, setCoverUrl] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setCoverUrl(novel.coverUrl ?? null);
+    }
+  }, [open, novel.coverUrl]);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const saved = await novelApi.update(novel.id, { coverUrl: coverUrl ?? "" });
+      onSaved(saved);
+      onClose();
+    } catch (e: any) {
+      message.error(e?.message ?? "保存失败");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      title="设置封面"
+      open={open}
+      onCancel={onClose}
+      onOk={save}
+      okText="保存"
+      confirmLoading={saving}
+    >
+      <div style={{ display: "flex", gap: 20, alignItems: "center" }}>
+        <div
+          style={{
+            width: 120,
+            height: 160,
+            borderRadius: 8,
+            overflow: "hidden",
+            background: novel.coverColor || "#6a5acd",
+            flex: "0 0 auto",
+          }}
+        >
+          {coverUrl ? (
+            <img src={coverUrl} alt="预览" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          ) : (
+            <div
+              style={{
+                height: "100%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "#fff",
+                fontSize: 40,
+                fontWeight: 700,
+              }}
+            >
+              {novel.title.slice(0, 1)}
+            </div>
+          )}
+        </div>
+        <div>
+          <Upload
+            accept="image/*"
+            showUploadList={false}
+            customRequest={async ({ file, onSuccess, onError }) => {
+              setUploading(true);
+              try {
+                const res = await uploadApi.upload(file as File);
+                setCoverUrl(res.url);
+                onSuccess?.(res);
+              } catch (e: any) {
+                onError?.(e as any);
+                message.error(e?.message ?? "上传失败");
+              } finally {
+                setUploading(false);
+              }
+            }}
+          >
+            <Button icon={<UploadOutlined />} loading={uploading}>
+              上传图片
+            </Button>
+          </Upload>
+          <p className="muted" style={{ marginTop: 8, fontSize: 12 }}>
+            支持 jpg/png/webp/gif，≤ 5MB
+          </p>
+          {coverUrl && (
+            <Button type="link" danger style={{ paddingLeft: 0 }} onClick={() => setCoverUrl(null)}>
+              移除封面
+            </Button>
+          )}
+        </div>
+      </div>
+    </Modal>
+  );
+}
 
 function ChaptersTab({
   novelId,

@@ -49,6 +49,10 @@ public class Novel {
     @Column(name = "cover_color", length = 20)
     private String coverColor;
 
+    /** 封面图片静态资源路径（/uploads/xxx.png），空/空串表示未设置 */
+    @Column(name = "cover_url", length = 500)
+    private String coverUrl;
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
@@ -140,6 +144,14 @@ public class Novel {
 
     public void setCoverColor(String coverColor) {
         this.coverColor = coverColor;
+    }
+
+    public String getCoverUrl() {
+        return coverUrl;
+    }
+
+    public void setCoverUrl(String coverUrl) {
+        this.coverUrl = coverUrl;
     }
 
     public LocalDateTime getCreatedAt() {

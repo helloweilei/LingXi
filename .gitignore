@@ -1,6 +1,7 @@
 # Java / Maven
 backend/target/
 backend/data/
+backend/uploads/
 *.class
 
 # Node

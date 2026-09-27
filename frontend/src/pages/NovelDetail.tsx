@@ -262,6 +262,7 @@ export default function NovelDetail() {
             children: (
               <AutoWritePanel
                 novelId={novelId}
+                targetWords={novel.targetWords ?? 0}
                 onProgress={() => {
                   load();
                   setChapterRefresh((k) => k + 1);

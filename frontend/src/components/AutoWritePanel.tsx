@@ -33,12 +33,24 @@ const STATUS_TAG: Record<string, { color: string; text: string }> = {
  * 自动创作面板：收集创作意图（模式/章节数/每章字数/大纲/摘要）并发起任务；
  * 轮询展示任务进度；CONFIRM 模式下支持逐章批准继续。
  * 任务进度变化时通过 onProgress 通知父页面刷新（如顶部字数统计）。
+ * 默认章节数 6；默认每章字数 = 总字数 / 6（总字数未设置时兜底 1200，区间 300-5000）。
  */
-export default function AutoWritePanel({ novelId, onProgress }: { novelId: number; onProgress?: () => void }) {
+export default function AutoWritePanel({
+  novelId,
+  targetWords = 0,
+  onProgress,
+}: {
+  novelId: number;
+  targetWords?: number;
+  onProgress?: () => void;
+}) {
   const [form] = Form.useForm();
   const [tasks, setTasks] = useState<WritingTaskVO[]>([]);
   const [starting, setStarting] = useState(false);
   const prevSigRef = useRef('');
+
+  const defaultWordsPerChapter =
+    targetWords > 0 ? Math.max(300, Math.min(5000, Math.round(targetWords / 6))) : 1200;
 
   const activeCount = tasks.filter((t) =>
     ['QUEUED', 'RUNNING', 'WAITING_APPROVAL'].includes(t.status)
@@ -83,7 +95,6 @@ export default function AutoWritePanel({ novelId, onProgress }: { novelId: numbe
         autoSummary: values.autoSummary,
       });
       message.success('自动创作任务已启动');
-      form.resetFields();
       load();
     } catch (e: any) {
       message.error(e?.message ?? '启动失败');
@@ -134,7 +145,7 @@ export default function AutoWritePanel({ novelId, onProgress }: { novelId: numbe
         <Form
           form={form}
           layout="inline"
-          initialValues={{ mode: 'AUTO', chapters: 5, wordsPerChapter: 1200, genOutline: true, autoSummary: true }}
+          initialValues={{ mode: 'AUTO', chapters: 6, wordsPerChapter: defaultWordsPerChapter, genOutline: true, autoSummary: true }}
           style={{ rowGap: 12 }}
         >
           <Form.Item name="mode" label="模式">

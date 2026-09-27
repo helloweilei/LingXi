@@ -53,6 +53,10 @@ public class Novel {
     @Column(name = "cover_url", length = 500)
     private String coverUrl;
 
+    /** 语言风格（AI 写作文风约束），空/空串表示未设置 */
+    @Column(name = "language_style", length = 50)
+    private String languageStyle;
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
@@ -152,6 +156,14 @@ public class Novel {
 
     public void setCoverUrl(String coverUrl) {
         this.coverUrl = coverUrl;
+    }
+
+    public String getLanguageStyle() {
+        return languageStyle;
+    }
+
+    public void setLanguageStyle(String languageStyle) {
+        this.languageStyle = languageStyle;
     }
 
     public LocalDateTime getCreatedAt() {

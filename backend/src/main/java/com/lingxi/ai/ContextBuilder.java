@@ -99,6 +99,9 @@ public class ContextBuilder {
         StringBuilder sb = new StringBuilder("【作品信息】\n书名：").append(novel.getTitle())
                 .append("\n类型：").append(orDefault(novel.getGenre(), "未设置"))
                 .append("\n简介：").append(orDefault(novel.getDescription(), "（暂无）"));
+        if (novel.getLanguageStyle() != null && !novel.getLanguageStyle().isBlank()) {
+            sb.append("\n语言风格：").append(novel.getLanguageStyle());
+        }
         return sb.toString();
     }
 

@@ -15,7 +15,8 @@ public final class NovelDtos {
             @Size(max = 1000) String description,
             @Size(max = 100) String genre,
             Integer targetWords,
-            String coverColor) {
+            String coverColor,
+            @Size(max = 50) String languageStyle) {
     }
 
     public record UpdateReq(
@@ -26,16 +27,17 @@ public final class NovelDtos {
             Integer targetWords,
             String coverColor,
             @Size(max = 500) String coverUrl,
-            @Size(max = 30000) String outline) {
+            @Size(max = 30000) String outline,
+            @Size(max = 50) String languageStyle) {
     }
 
     public record VO(Long id, String title, String description, String genre, String status,
-                     Integer targetWords, Long wordCount, String coverColor, String coverUrl, Long chapterCount,
-                     LocalDateTime createdAt, LocalDateTime updatedAt) {
+                     Integer targetWords, Long wordCount, String coverColor, String coverUrl, String languageStyle,
+                     Long chapterCount, LocalDateTime createdAt, LocalDateTime updatedAt) {
     }
 
     public record DetailVO(Long id, String title, String description, String genre, String status,
                            Integer targetWords, Long wordCount, String coverColor, String coverUrl, String outline,
-                           Long chapterCount, LocalDateTime createdAt, LocalDateTime updatedAt) {
+                           String languageStyle, Long chapterCount, LocalDateTime createdAt, LocalDateTime updatedAt) {
     }
 }

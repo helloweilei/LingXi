@@ -29,6 +29,20 @@ export const genreToArray = (v?: string | null) => (v ?? '').split(',').map((s) 
 export const genreToString = (arr?: string[]) => (arr ?? []).join(',');
 export const NOVEL_STATUS = ['草稿', '连载中', '已完结'];
 
+/** 预置语言风格（支持自定义输入） */
+export const LANGUAGE_STYLES = [
+  '现代白话',
+  '古典文风',
+  '轻松幽默',
+  '热血激昂',
+  '文艺唯美',
+  '悬疑冷峻',
+  '简洁干练',
+  '口语化',
+  '华丽辞藻',
+  '画面感强',
+];
+
 interface Props {
   open: boolean;
   editing: Novel | null;
@@ -44,8 +58,8 @@ export default function NovelFormModal({ open, editing, onClose, onSaved }: Prop
     if (open) {
       form.setFieldsValue(
         editing
-          ? { ...editing, genre: genreToArray(editing.genre) }
-          : { title: '', genre: ['玄幻'], description: '', targetWords: 500000, status: '草稿' }
+          ? { ...editing, genre: genreToArray(editing.genre), languageStyle: editing.languageStyle ? [editing.languageStyle] : undefined }
+          : { title: '', genre: ['玄幻'], description: '', targetWords: 500000, status: '草稿', languageStyle: undefined }
       );
     }
   }, [open, editing, form]);
@@ -53,7 +67,13 @@ export default function NovelFormModal({ open, editing, onClose, onSaved }: Prop
   const onFinish = async (values: any) => {
     setSaving(true);
     try {
-      const payload = { ...values, genre: genreToString(values.genre) };
+      const payload = {
+        ...values,
+        genre: genreToString(values.genre),
+        languageStyle: Array.isArray(values.languageStyle)
+          ? values.languageStyle[0] ?? ""
+          : values.languageStyle ?? "",
+      };
       const saved = editing
         ? await novelApi.update(editing.id, payload)
         : await novelApi.create(payload);
@@ -99,6 +119,8 @@ export default function NovelFormModal({ open, editing, onClose, onSaved }: Prop
               <Select options={NOVEL_STATUS.map((s) => ({ value: s, label: s }))} />
             </Form.Item>
           )}
+        </div>
+        <div style={{ display: 'flex', gap: 12 }}>
           <Form.Item name="targetWords" label="目标字数" style={{ flex: 1 }}>
             <InputNumber
               style={{ width: '100%' }}
@@ -106,6 +128,16 @@ export default function NovelFormModal({ open, editing, onClose, onSaved }: Prop
               step={100000}
               formatter={(v) => `${v}`}
               parser={(v) => Number(v ?? 0) as any}
+            />
+          </Form.Item>
+          <Form.Item name="languageStyle" label="语言风格" style={{ flex: 1 }}>
+            <Select
+              mode="tags"
+              maxCount={1}
+              allowClear
+              placeholder="选择或输入，如：轻松幽默"
+              options={LANGUAGE_STYLES.map((s) => ({ value: s, label: s }))}
+              tokenSeparators={[]}
             />
           </Form.Item>
         </div>

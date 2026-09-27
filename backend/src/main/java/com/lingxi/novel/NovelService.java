@@ -63,6 +63,7 @@ public class NovelService {
         novel.setTargetWords(req.targetWords());
         novel.setOutline("");
         novel.setCoverColor(pickCover(req.coverColor()));
+        novel.setLanguageStyle(req.languageStyle());
         novelRepository.save(novel);
         return toVO(novel, 0L);
     }
@@ -98,6 +99,9 @@ public class NovelService {
         }
         if (req.outline() != null) {
             novel.setOutline(req.outline());
+        }
+        if (req.languageStyle() != null) {
+            novel.setLanguageStyle(req.languageStyle());
         }
         return toDetailVO(novel, chapterRepository.countByNovelIdAndDeletedFalse(novelId));
     }
@@ -148,13 +152,13 @@ public class NovelService {
 
     private static VO toVO(Novel n, Long chapterCount) {
         return new VO(n.getId(), n.getTitle(), n.getDescription(), n.getGenre(), n.getStatus(),
-                n.getTargetWords(), n.getWordCount(), n.getCoverColor(), n.getCoverUrl(), chapterCount,
-                n.getCreatedAt(), n.getUpdatedAt());
+                n.getTargetWords(), n.getWordCount(), n.getCoverColor(), n.getCoverUrl(), n.getLanguageStyle(),
+                chapterCount, n.getCreatedAt(), n.getUpdatedAt());
     }
 
     private static DetailVO toDetailVO(Novel n, Long chapterCount) {
         return new DetailVO(n.getId(), n.getTitle(), n.getDescription(), n.getGenre(), n.getStatus(),
                 n.getTargetWords(), n.getWordCount(), n.getCoverColor(), n.getCoverUrl(), n.getOutline(),
-                chapterCount, n.getCreatedAt(), n.getUpdatedAt());
+                n.getLanguageStyle(), chapterCount, n.getCreatedAt(), n.getUpdatedAt());
     }
 }

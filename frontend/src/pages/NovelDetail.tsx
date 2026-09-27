@@ -138,6 +138,7 @@ export default function NovelDetail() {
                   </Tag>
                 ))}
               <Tag>{novel.status ?? "草稿"}</Tag>
+              {novel.languageStyle && <Tag color="cyan">{novel.languageStyle}</Tag>}
               <Button
                 type="link"
                 icon={<EditOutlined />}

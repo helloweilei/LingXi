@@ -20,6 +20,7 @@ export interface NovelSaveReq {
   coverColor?: string;
   coverUrl?: string | null;
   outline?: string;
+  languageStyle?: string | null;
 }
 
 export const authApi = {

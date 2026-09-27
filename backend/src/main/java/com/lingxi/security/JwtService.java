@@ -22,7 +22,7 @@ public class JwtService {
     private final long expireHours;
 
     public JwtService(@Value("${lingxi.jwt.secret}") String secret,
-                      @Value("${lingxi.jwt.expire-hours}") long expireHours,
+                      @Value("${lingxi.jwt.expire-hours}")long expireHours,
                       Environment environment) {
         if (DEFAULT_SECRET.equals(secret) && isProd(environment)) {
             throw new IllegalStateException("生产环境禁止使用默认 JWT 密钥，请通过环境变量 LINGXI_JWT_SECRET 配置至少 32 字节的随机串");

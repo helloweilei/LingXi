@@ -36,20 +36,27 @@ public class LoginRateLimiter {
     /** 记录一次失败；达到阈值后进入锁定状态 */
     public void onFailure(String key) {
         long now = Instant.now().toEpochMilli();
-        Attempt a = attempts.compute(key, (k, old) -> {
-            Attempt base = old;
-            if (base == null || base.blockedUntil != null || now - base.windowStart > WINDOW_MINUTES * 60_000L) {
+        attempts.compute(key, (k, old) -> {
+            // 1. 如果处于锁定状态且未过期，直接返回原对象，绝不重置计数
+            if (old != null && old.blockedUntil != null && Instant.now().isBefore(old.blockedUntil)) {
+                return old;
+            }
+
+            // 2. 初始化 或 窗口过期，重置计数
+            if (old == null || now - old.windowStart > WINDOW_MINUTES * 60_000L) {
                 return new Attempt(new AtomicInteger(1), now, null);
             }
-            base.failures.incrementAndGet();
-            return base;
+
+            // 3. 窗口内累加
+            old.failures.incrementAndGet();
+
+            // 4. 达到阈值，设置锁定时间（在同一个 compute 内完成，保证原子性）
+            if (old.failures.get() >= MAX_FAILURES) {
+                return new Attempt(old.failures, old.windowStart, Instant.now().plusSeconds(LOCK_MINUTES * 60));
+            }
+
+            return old;
         });
-        if (a.failures.get() >= MAX_FAILURES) {
-            attempts.computeIfPresent(key, (k, old) ->
-                    old.blockedUntil == null && old.failures.get() >= MAX_FAILURES
-                            ? new Attempt(old.failures, old.windowStart, Instant.now().plusSeconds(LOCK_MINUTES * 60))
-                            : old);
-        }
     }
 
     /** 登录成功：清空该 key 的失败记录 */

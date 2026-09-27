@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { Key } from 'react';
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { Key } from "react";
 import {
   Button,
   Card,
@@ -18,7 +18,7 @@ import {
   Tabs,
   Tag,
   message,
-} from 'antd';
+} from "antd";
 import {
   ArrowLeftOutlined,
   DeleteOutlined,
@@ -27,30 +27,33 @@ import {
   PlusOutlined,
   RobotOutlined,
   SaveOutlined,
-} from '@ant-design/icons';
-import { useNavigate, useParams } from 'react-router-dom';
-import dayjs from 'dayjs';
-import { chapterApi, characterApi, novelApi, worldApi } from '../api';
-import { streamSse } from '../api/ai';
+} from "@ant-design/icons";
+import { useNavigate, useParams } from "react-router-dom";
+import dayjs from "dayjs";
+import { chapterApi, characterApi, novelApi, worldApi } from "../api";
+import { streamSse } from "../api/ai";
 import type {
   ChapterMeta,
   CharacterVO,
   ChatMsg,
   NovelDetail,
   WorldVO,
-} from '../api/types';
-import AiDrawer from '../components/AiDrawer';
-import AutoWritePanel from '../components/AutoWritePanel';
-import NovelFormModal, { GENRES, NOVEL_STATUS } from '../components/NovelFormModal';
-import MDEditor from '@uiw/react-md-editor';
-import '@uiw/react-md-editor/markdown-editor.css';
-import '@uiw/react-markdown-preview/markdown.css';
+} from "../api/types";
+import AiDrawer from "../components/AiDrawer";
+import AutoWritePanel from "../components/AutoWritePanel";
+import NovelFormModal, {
+  GENRES,
+  NOVEL_STATUS,
+} from "../components/NovelFormModal";
+import MDEditor from "@uiw/react-md-editor";
+import "@uiw/react-md-editor/markdown-editor.css";
+import "@uiw/react-markdown-preview/markdown.css";
 
 const ROLE_COLOR: Record<string, string> = {
-  主角: 'magenta',
-  配角: 'blue',
-  反派: 'red',
-  其他: 'default',
+  主角: "magenta",
+  配角: "blue",
+  反派: "red",
+  其他: "default",
 };
 
 export default function NovelDetail() {
@@ -58,25 +61,28 @@ export default function NovelDetail() {
   const navigate = useNavigate();
   const novelId = Number(id);
   const [novel, setNovel] = useState<NovelDetail | null>(null);
-  const [tab, setTab] = useState('chapters');
+  const [tab, setTab] = useState("chapters");
   const [editOpen, setEditOpen] = useState(false);
   const [outlineOpen, setOutlineOpen] = useState(false);
-  const [outline, setOutline] = useState('');
+  const [outline, setOutline] = useState("");
   const [chapterRefresh, setChapterRefresh] = useState(0);
 
   const load = useCallback(async () => {
     const n = await novelApi.detail(novelId);
     setNovel(n);
-    setOutline(n.outline ?? '');
+    setOutline(n.outline ?? "");
   }, [novelId]);
 
   useEffect(() => {
-    load().catch((e) => message.error(e?.message ?? '加载失败'));
+    load().catch((e) => message.error(e?.message ?? "加载失败"));
   }, [load]);
 
   if (!novel) {
     return (
-      <div className="page-container" style={{ textAlign: 'center', paddingTop: 100 }}>
+      <div
+        className="page-container"
+        style={{ textAlign: "center", paddingTop: 100 }}
+      >
         <Spin size="large" />
       </div>
     );
@@ -87,16 +93,19 @@ export default function NovelDetail() {
     try {
       const saved = await novelApi.update(novelId, { outline: value });
       setNovel(saved);
-      setOutline(saved.outline ?? '');
-      message.success('大纲已保存');
+      setOutline(saved.outline ?? "");
+      message.success("大纲已保存");
     } catch (e: any) {
-      message.error(e?.message ?? '保存失败');
+      message.error(e?.message ?? "保存失败");
     }
   };
 
   const progress =
     novel.targetWords && novel.targetWords > 0
-      ? Math.min(100, Math.round(((novel.wordCount ?? 0) / novel.targetWords) * 100))
+      ? Math.min(
+          100,
+          Math.round(((novel.wordCount ?? 0) / novel.targetWords) * 100),
+        )
       : null;
 
   return (
@@ -104,19 +113,21 @@ export default function NovelDetail() {
       <Button
         type="text"
         icon={<ArrowLeftOutlined />}
-        onClick={() => navigate('/')}
+        onClick={() => navigate("/")}
         style={{ marginBottom: 12 }}
       >
         返回作品台
       </Button>
 
       <div className="section-card" style={{ marginBottom: 20 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 20 }}>
+        <div
+          style={{ display: "flex", justifyContent: "space-between", gap: 20 }}
+        >
           <div style={{ flex: 1 }}>
             <Space size={10} align="center" wrap>
               <h2 style={{ margin: 0 }}>{novel.title}</h2>
-              {(novel.genre ?? '')
-                .split(',')
+              {(novel.genre ?? "")
+                .split(",")
                 .map((g) => g.trim())
                 .filter(Boolean)
                 .map((g, i) => (
@@ -124,28 +135,46 @@ export default function NovelDetail() {
                     {g}
                   </Tag>
                 ))}
-              <Tag>{novel.status ?? '草稿'}</Tag>
-              <Button type="link" icon={<EditOutlined />} onClick={() => setEditOpen(true)}>
+              <Tag>{novel.status ?? "草稿"}</Tag>
+              <Button
+                type="link"
+                icon={<EditOutlined />}
+                onClick={() => setEditOpen(true)}
+              >
                 编辑信息
               </Button>
             </Space>
-            <p className="muted" style={{ margin: '10px 0 0', maxWidth: 760 }}>
-              {novel.description || '（还没有简介，点击“编辑信息”补一句吧，AI 会用它理解你的书）'}
+            <p className="muted" style={{ margin: "10px 0 0", maxWidth: 760 }}>
+              {novel.description ||
+                "（还没有简介，点击“编辑信息”补一句吧，AI 会用它理解你的书）"}
             </p>
             {progress !== null && (
               <div style={{ maxWidth: 420, marginTop: 12 }}>
-                <Progress percent={progress} size="small" strokeColor="#6a5acd" />
+                <Progress
+                  percent={progress}
+                  size="small"
+                  strokeColor="#6a5acd"
+                />
                 <span className="muted" style={{ fontSize: 12 }}>
-                  {(novel.wordCount ?? 0).toLocaleString()} / {novel.targetWords?.toLocaleString()} 字
+                  {(novel.wordCount ?? 0).toLocaleString()} /{" "}
+                  {novel.targetWords?.toLocaleString()} 字
                 </span>
               </div>
             )}
           </div>
-          <div style={{ textAlign: 'right', color: '#9a9ab0', fontSize: 13, lineHeight: 2 }}>
+          <div
+            style={{
+              textAlign: "right",
+              color: "#9a9ab0",
+              fontSize: 13,
+              lineHeight: 2,
+            }}
+          >
             <div>
-              共 {novel.chapterCount} 章 · {(novel.wordCount ?? 0).toLocaleString()} 字
+              共 {novel.chapterCount} 章 ·{" "}
+              {(novel.wordCount ?? 0).toLocaleString()} 字
             </div>
-            <div>创建于 {dayjs(novel.createdAt).format('YYYY-MM-DD')}</div>
+            <div>创建于 {dayjs(novel.createdAt).format("YYYY-MM-DD")}</div>
           </div>
         </div>
       </div>
@@ -155,35 +184,53 @@ export default function NovelDetail() {
         onChange={setTab}
         items={[
           {
-            key: 'chapters',
-            label: '章节',
-            children: <ChaptersTab novelId={novelId} refreshKey={chapterRefresh} />,
+            key: "chapters",
+            label: "章节",
+            children: (
+              <ChaptersTab novelId={novelId} refreshKey={chapterRefresh} />
+            ),
           },
           {
-            key: 'characters',
-            label: '角色设定',
+            key: "characters",
+            label: "角色设定",
             children: <CharactersTab novelId={novelId} />,
           },
           {
-            key: 'world',
-            label: '世界观',
+            key: "world",
+            label: "世界观",
             children: <WorldTab novelId={novelId} />,
           },
           {
-            key: 'outline',
-            label: '全书大纲',
+            key: "outline",
+            label: "全书大纲",
             children: (
               <div className="section-card">
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    marginBottom: 12,
+                  }}
+                >
                   <Space>
                     <b>全书大纲</b>
-                    <span className="muted">AI 生成时会结合书名、简介与角色设定</span>
+                    <span className="muted">
+                      AI 生成时会结合书名、简介与角色设定
+                    </span>
                   </Space>
                   <Space>
-                    <Button icon={<RobotOutlined />} type="primary" ghost onClick={() => setOutlineOpen(true)}>
+                    <Button
+                      icon={<RobotOutlined />}
+                      type="primary"
+                      ghost
+                      onClick={() => setOutlineOpen(true)}
+                    >
                       AI 生成大纲
                     </Button>
-                    <Button icon={<SaveOutlined />} onClick={() => saveOutline()}>
+                    <Button
+                      icon={<SaveOutlined />}
+                      onClick={() => saveOutline()}
+                    >
                       保存大纲
                     </Button>
                   </Space>
@@ -191,13 +238,13 @@ export default function NovelDetail() {
                 <div data-color-mode="light">
                   <MDEditor
                     value={outline}
-                    onChange={(v) => setOutline(v ?? '')}
+                    onChange={(v) => setOutline(v ?? "")}
                     height="auto"
-                    preview="live"
+                    preview="edit"
                     visibleDragbar={false}
-                    style={{ minHeight: 400 }}
                     textareaProps={{
-                      placeholder: '在这里写下或让 AI 生成全书大纲：分卷、核心冲突、关键章节梗概……',
+                      placeholder:
+                        "在这里写下或让 AI 生成全书大纲：分卷、核心冲突、关键章节梗概……",
                     }}
                   />
                 </div>
@@ -205,13 +252,13 @@ export default function NovelDetail() {
             ),
           },
           {
-            key: 'chat',
-            label: 'AI 助手',
+            key: "chat",
+            label: "AI 助手",
             children: <ChatTab novelId={novelId} />,
           },
           {
-            key: 'auto',
-            label: '自动创作',
+            key: "auto",
+            label: "自动创作",
             children: (
               <AutoWritePanel
                 novelId={novelId}
@@ -232,10 +279,15 @@ export default function NovelDetail() {
         onSaved={(n) => {
           setNovel((prev) =>
             prev
-              ? { ...prev, ...n, outline: 'outline' in n ? String((n as any).outline) : prev.outline }
-              : (n as NovelDetail)
+              ? {
+                  ...prev,
+                  ...n,
+                  outline:
+                    "outline" in n ? String((n as any).outline) : prev.outline,
+                }
+              : (n as NovelDetail),
           );
-          message.success('已保存');
+          message.success("已保存");
         }}
       />
       <AiDrawer
@@ -255,12 +307,18 @@ export default function NovelDetail() {
 
 /* ---------------- 章节 ---------------- */
 
-function ChaptersTab({ novelId, refreshKey }: { novelId: number; refreshKey: number }) {
+function ChaptersTab({
+  novelId,
+  refreshKey,
+}: {
+  novelId: number;
+  refreshKey: number;
+}) {
   const navigate = useNavigate();
   const [chapters, setChapters] = useState<ChapterMeta[]>([]);
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
-  const [newTitle, setNewTitle] = useState('');
+  const [newTitle, setNewTitle] = useState("");
   const [creating, setCreating] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<Key[]>([]);
   const [batchDeleting, setBatchDeleting] = useState(false);
@@ -270,7 +328,7 @@ function ChaptersTab({ novelId, refreshKey }: { novelId: number; refreshKey: num
     try {
       setChapters(await chapterApi.list(novelId));
     } catch (e: any) {
-      message.error(e?.message ?? '加载失败');
+      message.error(e?.message ?? "加载失败");
     } finally {
       setLoading(false);
     }
@@ -283,13 +341,15 @@ function ChaptersTab({ novelId, refreshKey }: { novelId: number; refreshKey: num
   const createChapter = async () => {
     setCreating(true);
     try {
-      const ch = await chapterApi.create(novelId, { title: newTitle || undefined });
-      message.success('章节已创建');
+      const ch = await chapterApi.create(novelId, {
+        title: newTitle || undefined,
+      });
+      message.success("章节已创建");
       setCreateOpen(false);
-      setNewTitle('');
+      setNewTitle("");
       navigate(`/write/${ch.id}`);
     } catch (e: any) {
-      message.error(e?.message ?? '创建失败');
+      message.error(e?.message ?? "创建失败");
     } finally {
       setCreating(false);
     }
@@ -297,7 +357,7 @@ function ChaptersTab({ novelId, refreshKey }: { novelId: number; refreshKey: num
 
   const removeChapter = async (cid: number) => {
     await chapterApi.remove(cid);
-    message.success('章节已删除');
+    message.success("章节已删除");
     load();
   };
 
@@ -312,7 +372,7 @@ function ChaptersTab({ novelId, refreshKey }: { novelId: number; refreshKey: num
       setSelectedKeys([]);
       load();
     } catch (e: any) {
-      message.error(e?.message ?? '批量删除失败');
+      message.error(e?.message ?? "批量删除失败");
     } finally {
       setBatchDeleting(false);
     }
@@ -320,7 +380,13 @@ function ChaptersTab({ novelId, refreshKey }: { novelId: number; refreshKey: num
 
   return (
     <div className="section-card">
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 14 }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          marginBottom: 14,
+        }}
+      >
         <b>章节列表</b>
         <Space>
           {selectedKeys.length > 0 && (
@@ -336,7 +402,11 @@ function ChaptersTab({ novelId, refreshKey }: { novelId: number; refreshKey: num
               </Button>
             </Popconfirm>
           )}
-          <Button type="primary" icon={<FileAddOutlined />} onClick={() => setCreateOpen(true)}>
+          <Button
+            type="primary"
+            icon={<FileAddOutlined />}
+            onClick={() => setCreateOpen(true)}
+          >
             新建章节
           </Button>
         </Space>
@@ -354,35 +424,44 @@ function ChaptersTab({ novelId, refreshKey }: { novelId: number; refreshKey: num
           emptyText: <Empty description="还没有章节，点击右上角新建" />,
         }}
         columns={[
-          { title: '#', dataIndex: 'chapterOrder', width: 60 },
+          { title: "#", dataIndex: "chapterOrder", width: 60 },
           {
-            title: '章节名',
-            dataIndex: 'title',
+            title: "章节名",
+            dataIndex: "title",
             render: (t: string, r: ChapterMeta) => (
               <a onClick={() => navigate(`/read/${r.id}`)}>{t}</a>
             ),
           },
           {
-            title: '字数',
-            dataIndex: 'wordCount',
+            title: "字数",
+            dataIndex: "wordCount",
             width: 110,
             render: (w: number) => `${(w ?? 0).toLocaleString()}`,
           },
           {
-            title: '更新时间',
-            dataIndex: 'updatedAt',
+            title: "更新时间",
+            dataIndex: "updatedAt",
             width: 180,
-            render: (t: string) => dayjs(t).format('MM-DD HH:mm'),
+            render: (t: string) => dayjs(t).format("MM-DD HH:mm"),
           },
           {
-            title: '操作',
+            title: "操作",
             width: 160,
             render: (_: any, r: ChapterMeta) => (
               <Space>
-                <Button type="link" size="small" onClick={() => navigate(`/write/${r.id}`)}>
+                <Button
+                  type="link"
+                  size="small"
+                  onClick={() => navigate(`/write/${r.id}`)}
+                >
                   写作
                 </Button>
-                <Popconfirm title="确定删除这一章？" okText="删除" okButtonProps={{ danger: true }} onConfirm={() => removeChapter(r.id)}>
+                <Popconfirm
+                  title="确定删除这一章？"
+                  okText="删除"
+                  okButtonProps={{ danger: true }}
+                  onConfirm={() => removeChapter(r.id)}
+                >
                   <Button type="link" size="small" danger>
                     删除
                   </Button>
@@ -435,7 +514,7 @@ function CharactersTab({ novelId }: { novelId: number }) {
 
   const openModal = (c: CharacterVO | null) => {
     setEditing(c);
-    form.setFieldsValue(c ?? { name: '', role: '配角', description: '' });
+    form.setFieldsValue(c ?? { name: "", role: "配角", description: "" });
     setModalOpen(true);
   };
 
@@ -446,22 +525,32 @@ function CharactersTab({ novelId }: { novelId: number }) {
     } else {
       await characterApi.create(novelId, values);
     }
-    message.success('已保存');
+    message.success("已保存");
     setModalOpen(false);
     load();
   };
 
   const remove = async (cid: number) => {
     await characterApi.remove(cid);
-    message.success('已删除');
+    message.success("已删除");
     load();
   };
 
   return (
     <div className="section-card">
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 14 }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          marginBottom: 14,
+        }}
+      >
         <b>角色设定</b>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => openModal(null)}>
+        <Button
+          type="primary"
+          icon={<PlusOutlined />}
+          onClick={() => openModal(null)}
+        >
           新增角色
         </Button>
       </div>
@@ -477,21 +566,28 @@ function CharactersTab({ novelId }: { novelId: number }) {
                 size="small"
                 title={
                   <span>
-                    {c.name} <Tag color={ROLE_COLOR[c.role] ?? 'default'}>{c.role}</Tag>
+                    {c.name}{" "}
+                    <Tag color={ROLE_COLOR[c.role] ?? "default"}>{c.role}</Tag>
                   </span>
                 }
                 actions={[
                   <span key="edit" onClick={() => openModal(c)}>
                     <EditOutlined /> 编辑
                   </span>,
-                  <Popconfirm key="del" title="确定删除该角色？" okText="删除" okButtonProps={{ danger: true }} onConfirm={() => remove(c.id)}>
-                    <span style={{ color: '#9a9ab0' }}>
+                  <Popconfirm
+                    key="del"
+                    title="确定删除该角色？"
+                    okText="删除"
+                    okButtonProps={{ danger: true }}
+                    onConfirm={() => remove(c.id)}
+                  >
+                    <span style={{ color: "#9a9ab0" }}>
                       <DeleteOutlined /> 删除
                     </span>
                   </Popconfirm>,
                 ]}
               >
-                <p style={{ minHeight: 44, whiteSpace: 'pre-wrap', margin: 0 }}>
+                <p style={{ minHeight: 44, whiteSpace: "pre-wrap", margin: 0 }}>
                   {c.description || <span className="muted">（暂无描述）</span>}
                 </p>
               </Card>
@@ -500,22 +596,35 @@ function CharactersTab({ novelId }: { novelId: number }) {
         </Row>
       )}
       <Modal
-        title={editing ? '编辑角色' : '新增角色'}
+        title={editing ? "编辑角色" : "新增角色"}
         open={modalOpen}
         onCancel={() => setModalOpen(false)}
         onOk={save}
         okText="保存"
       >
         <Form form={form} layout="vertical">
-          <div style={{ display: 'flex', gap: 12 }}>
-            <Form.Item name="name" label="姓名" rules={[{ required: true, message: '请输入角色名' }]} style={{ flex: 1 }}>
+          <div style={{ display: "flex", gap: 12 }}>
+            <Form.Item
+              name="name"
+              label="姓名"
+              rules={[{ required: true, message: "请输入角色名" }]}
+              style={{ flex: 1 }}
+            >
               <Input maxLength={60} />
             </Form.Item>
             <Form.Item name="role" label="定位" style={{ flex: 1 }}>
-              <Select options={['主角', '配角', '反派', '其他'].map((v) => ({ value: v, label: v }))} />
+              <Select
+                options={["主角", "配角", "反派", "其他"].map((v) => ({
+                  value: v,
+                  label: v,
+                }))}
+              />
             </Form.Item>
           </div>
-          <Form.Item name="description" label="人物设定（性格 / 背景 / 能力 / 目标）">
+          <Form.Item
+            name="description"
+            label="人物设定（性格 / 背景 / 能力 / 目标）"
+          >
             <Input.TextArea rows={5} maxLength={5000} showCount />
           </Form.Item>
         </Form>
@@ -548,7 +657,7 @@ function WorldTab({ novelId }: { novelId: number }) {
 
   const openModal = (w: WorldVO | null) => {
     setEditing(w);
-    form.setFieldsValue(w ?? { title: '', content: '' });
+    form.setFieldsValue(w ?? { title: "", content: "" });
     setModalOpen(true);
   };
 
@@ -559,22 +668,32 @@ function WorldTab({ novelId }: { novelId: number }) {
     } else {
       await worldApi.create(novelId, values);
     }
-    message.success('已保存');
+    message.success("已保存");
     setModalOpen(false);
     load();
   };
 
   const remove = async (wid: number) => {
     await worldApi.remove(wid);
-    message.success('已删除');
+    message.success("已删除");
     load();
   };
 
   return (
     <div className="section-card">
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 14 }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          marginBottom: 14,
+        }}
+      >
         <b>世界观设定</b>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => openModal(null)}>
+        <Button
+          type="primary"
+          icon={<PlusOutlined />}
+          onClick={() => openModal(null)}
+        >
           新增条目
         </Button>
       </div>
@@ -593,14 +712,20 @@ function WorldTab({ novelId }: { novelId: number }) {
                   <span key="edit" onClick={() => openModal(w)}>
                     <EditOutlined /> 编辑
                   </span>,
-                  <Popconfirm key="del" title="确定删除该条目？" okText="删除" okButtonProps={{ danger: true }} onConfirm={() => remove(w.id)}>
-                    <span style={{ color: '#9a9ab0' }}>
+                  <Popconfirm
+                    key="del"
+                    title="确定删除该条目？"
+                    okText="删除"
+                    okButtonProps={{ danger: true }}
+                    onConfirm={() => remove(w.id)}
+                  >
+                    <span style={{ color: "#9a9ab0" }}>
                       <DeleteOutlined /> 删除
                     </span>
                   </Popconfirm>,
                 ]}
               >
-                <p style={{ minHeight: 44, whiteSpace: 'pre-wrap', margin: 0 }}>
+                <p style={{ minHeight: 44, whiteSpace: "pre-wrap", margin: 0 }}>
                   {w.content || <span className="muted">（暂无内容）</span>}
                 </p>
               </Card>
@@ -609,15 +734,22 @@ function WorldTab({ novelId }: { novelId: number }) {
         </Row>
       )}
       <Modal
-        title={editing ? '编辑条目' : '新增条目'}
+        title={editing ? "编辑条目" : "新增条目"}
         open={modalOpen}
         onCancel={() => setModalOpen(false)}
         onOk={save}
         okText="保存"
       >
         <Form form={form} layout="vertical">
-          <Form.Item name="title" label="条目标题" rules={[{ required: true, message: '请输入标题' }]}>
-            <Input maxLength={80} placeholder="如：力量体系 / 地理格局 / 势力划分" />
+          <Form.Item
+            name="title"
+            label="条目标题"
+            rules={[{ required: true, message: "请输入标题" }]}
+          >
+            <Input
+              maxLength={80}
+              placeholder="如：力量体系 / 地理格局 / 势力划分"
+            />
           </Form.Item>
           <Form.Item name="content" label="内容">
             <Input.TextArea rows={6} maxLength={10000} showCount />
@@ -632,7 +764,7 @@ function WorldTab({ novelId }: { novelId: number }) {
 
 function ChatTab({ novelId }: { novelId: number }) {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
-  const [input, setInput] = useState('');
+  const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [errorAt, setErrorAt] = useState(-1);
   const abortRef = useRef<AbortController | null>(null);
@@ -653,8 +785,12 @@ function ChatTab({ novelId }: { novelId: number }) {
       .filter((m) => m.content)
       .slice(-10)
       .map((m) => ({ role: m.role, content: m.content }));
-    setMessages((prev) => [...prev, { role: 'user', content: q }, { role: 'assistant', content: '' }]);
-    setInput('');
+    setMessages((prev) => [
+      ...prev,
+      { role: "user", content: q },
+      { role: "assistant", content: "" },
+    ]);
+    setInput("");
     setSending(true);
     setErrorAt(-1);
 
@@ -672,19 +808,22 @@ function ChatTab({ novelId }: { novelId: number }) {
         `/api/ai/novels/${novelId}/chat`,
         { message: q, history },
         {
-          onDelta: (d) => patchLast({ content: msgRef.current[msgRef.current.length - 1].content + d }),
+          onDelta: (d) =>
+            patchLast({
+              content: msgRef.current[msgRef.current.length - 1].content + d,
+            }),
           onDone: () => undefined,
           onError: (m) => {
             setErrorAt(msgRef.current.length - 1);
             patchLast({ content: m });
           },
         },
-        controller.signal
+        controller.signal,
       );
     } catch (e: any) {
       if (!controller.signal.aborted) {
         setErrorAt(msgRef.current.length - 1);
-        patchLast({ content: e?.message ?? '请求失败' });
+        patchLast({ content: e?.message ?? "请求失败" });
       }
     } finally {
       setSending(false);
@@ -699,7 +838,11 @@ function ChatTab({ novelId }: { novelId: number }) {
           结合本书的书名、简介、大纲与设定回答创作问题
         </span>
       </div>
-      <div className="chat-list" ref={listRef} style={{ maxHeight: '46vh', overflow: 'auto', minHeight: 200 }}>
+      <div
+        className="chat-list"
+        ref={listRef}
+        style={{ maxHeight: "46vh", overflow: "auto", minHeight: 200 }}
+      >
         {messages.length === 0 && (
           <Empty
             description={
@@ -713,13 +856,13 @@ function ChatTab({ novelId }: { novelId: number }) {
         {messages.map((m, i) => (
           <div
             key={i}
-            className={`chat-bubble ${m.role}${i === errorAt ? ' error' : ''}`}
+            className={`chat-bubble ${m.role}${i === errorAt ? " error" : ""}`}
           >
-            {m.content || (sending && i === messages.length - 1 ? '……' : '')}
+            {m.content || (sending && i === messages.length - 1 ? "……" : "")}
           </div>
         ))}
       </div>
-      <div style={{ display: 'flex', gap: 10 }}>
+      <div style={{ display: "flex", gap: 10 }}>
         <Input.TextArea
           value={input}
           onChange={(e) => setInput(e.target.value)}

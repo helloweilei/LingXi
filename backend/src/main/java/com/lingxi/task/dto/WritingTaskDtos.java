@@ -17,7 +17,9 @@ public final class WritingTaskDtos {
             @Min(value = 1, message = "章节数最少 1 章") @Max(value = 50, message = "单次最多 50 章") Integer chapters,
             @Min(value = 300, message = "每章字数最少 300 字") @Max(value = 5000, message = "每章字数最多 5000 字") Integer wordsPerChapter,
             Boolean genOutline,
-            Boolean autoSummary) {
+            Boolean autoSummary,
+            /** 从第 N 章开始续跑（跳过前面的章节，用于失败任务断点续写） */
+            @Min(value = 1, message = "起始章节最少为第 1 章") Integer startChapter) {
     }
 
     /** 任务视图（不含敏感信息） */

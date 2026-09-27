@@ -71,17 +71,22 @@ public class AutoWriteService {
         executor.shutdownNow();
     }
 
-    /** 发起自动创作任务（校验意图参数；每本书同时只允许一个进行中任务） */
+    /** 发起自动创作任务（校验意图参数；每本书同时只允许一个进行中任务）。
+     * 支持 startChapter：从第 N 章续跑（跳过前面已生成的章节，用于失败任务断点续写）。 */
     public TaskVO start(Long novelId, User user, AutoWriteReq req) {
         novelService.loadOwned(novelId, user);
         int chapters = req.chapters() == null ? 5 : req.chapters();
         int wordsPerChapter = req.wordsPerChapter() == null ? 1200 : req.wordsPerChapter();
         String mode = req.mode() == null ? "AUTO" : req.mode();
+        int startChapter = req.startChapter() == null ? 1 : req.startChapter();
         if (chapters < 1 || chapters > 50) {
             throw new BizException(400, "章节数需在 1-50 之间", 400);
         }
         if (wordsPerChapter < 300 || wordsPerChapter > 5000) {
             throw new BizException(400, "每章字数需在 300-5000 之间", 400);
+        }
+        if (startChapter < 1 || startChapter > chapters) {
+            throw new BizException(400, "起始章节需在 1-" + chapters + " 之间", 400);
         }
         if (taskRepository.existsByNovelIdAndStatusIn(novelId, ACTIVE)) {
             throw new BizException(409, "该书已有进行中的自动创作任务，请先等待或取消", 409);
@@ -94,7 +99,7 @@ public class AutoWriteService {
         task.setMode(mode);
         task.setStatus(WritingTaskStatus.QUEUED);
         task.setTotalChapters(chapters);
-        task.setCurrentChapter(0);
+        task.setCurrentChapter(startChapter - 1);
         task.setParams(writeParams(params));
         taskRepository.save(task);
         executor.submit(() -> run(task.getId(), user));
@@ -189,18 +194,47 @@ public class AutoWriteService {
                 }
             }
 
-            // 步骤 2：逐章生成
+            // 步骤 2：逐章生成（支持断点续跑：已有内容的章节跳过，失败残留的空壳章节复用填充）
             while (task.getCurrentChapter() < task.getTotalChapters() && isActive(task.getId())) {
                 int next = task.getCurrentChapter() + 1;
-                var ch = chapterService.create(novel.getId(), user, new SaveReq(null, null, null));
-                appendCreatedChapter(task, ch.id());
-                saveTask(task); // 先记录章节归属：中途失败也能被删除任务清理
-                String content = collect(aiService.writeChapter(novel.getId(), ch.id(), p.wordsPerChapter, user));
+                var existing = chapterService.findByNovelAndOrder(novel.getId(), next, user);
+                Long chapterId;
+                int chapterOrder;
+                if (existing.isPresent() && existing.get().wordCount() > 0) {
+                    // 已有正文：幂等跳过，仅推进进度（续跑场景下前面的章节不动）
+                    task.setCurrentChapter(next);
+                    task.setCurrentTitle("第" + next + "章");
+                    task.setError(null);
+                    saveTask(task);
+                    continue;
+                }
+                if (existing.isPresent()) {
+                    // 上次失败残留的空壳章节（0 字）：复用，不新建
+                    chapterId = existing.get().id();
+                    chapterOrder = existing.get().chapterOrder();
+                    appendCreatedChapter(task, chapterId);
+                    saveTask(task);
+                } else {
+                    var ch = chapterService.create(novel.getId(), user, new SaveReq(null, null, null));
+                    chapterId = ch.id();
+                    chapterOrder = ch.chapterOrder();
+                    appendCreatedChapter(task, chapterId);
+                    saveTask(task); // 先记录章节归属：中途失败也能被删除任务清理
+                }
+                // 生成整章正文；LLM 偶发空响应时自动重试（共 3 次）
+                String content = null;
+                for (int attempt = 1; attempt <= 3 && (content == null || content.isBlank()); attempt++) {
+                    if (attempt > 1) {
+                        log.warn("Auto write novel {} chapter {} returned blank content, retry {}/3",
+                                novel.getId(), next, attempt);
+                    }
+                    content = collect(aiService.writeChapter(novel.getId(), chapterId, p.wordsPerChapter, user));
+                }
                 if (content.isBlank()) {
                     throw new BizException(502, "AI 未生成正文（第 " + next + " 章）", 502);
                 }
-                String title = "第" + ch.chapterOrder() + "章";
-                chapterService.save(ch.id(), user, new SaveReq(title, content, "ai"));
+                String title = "第" + chapterOrder + "章";
+                chapterService.save(chapterId, user, new SaveReq(title, content, "ai"));
 
                 task.setCurrentChapter(next);
                 task.setCurrentTitle(title);
@@ -208,7 +242,7 @@ public class AutoWriteService {
                 saveTask(task);
 
                 if (p.autoSummary) {
-                    collect(aiService.summarize(novel.getId(), ch.id(), user));
+                    collect(aiService.summarize(novel.getId(), chapterId, user));
                 }
 
                 // CONFIRM 模式：每完成一章即挂起，等待用户批准

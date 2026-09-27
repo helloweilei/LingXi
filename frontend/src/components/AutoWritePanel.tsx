@@ -47,6 +47,7 @@ export default function AutoWritePanel({
   const [form] = Form.useForm();
   const [tasks, setTasks] = useState<WritingTaskVO[]>([]);
   const [starting, setStarting] = useState(false);
+  const [resumingId, setResumingId] = useState<number | null>(null);
   const prevSigRef = useRef('');
 
   const defaultWordsPerChapter =
@@ -110,6 +111,27 @@ export default function AutoWritePanel({
       load();
     } catch (e: any) {
       message.error(e?.message ?? '操作失败');
+    }
+  };
+
+  /** 失败任务断点续跑：沿用原任务的参数，从失败处（currentChapter+1）继续生成 */
+  const resume = async (t: WritingTaskVO) => {
+    setResumingId(t.id);
+    try {
+      await taskApi.start(t.novelId, {
+        mode: t.mode,
+        chapters: t.chapters,
+        wordsPerChapter: t.wordsPerChapter,
+        genOutline: t.genOutline,
+        autoSummary: t.autoSummary,
+        startChapter: (t.currentChapter ?? 0) + 1,
+      });
+      message.success('已从第 ' + ((t.currentChapter ?? 0) + 1) + ' 章继续生成');
+      load();
+    } catch (e: any) {
+      message.error(e?.message ?? '续跑失败');
+    } finally {
+      setResumingId(null);
     }
   };
 
@@ -238,7 +260,7 @@ export default function AutoWritePanel({
           },
           {
             title: '操作',
-            width: 150,
+            width: 210,
             render: (_: any, r: WritingTaskVO) => (
               <Space>
                 {r.status === 'WAITING_APPROVAL' && (
@@ -249,6 +271,17 @@ export default function AutoWritePanel({
                 {['QUEUED', 'RUNNING', 'WAITING_APPROVAL'].includes(r.status) && (
                   <Button type="link" size="small" danger icon={<PauseCircleOutlined />} onClick={() => cancel(r.id)}>
                     取消
+                  </Button>
+                )}
+                {r.status === 'FAILED' && (r.currentChapter ?? 0) < (r.totalChapters ?? 0) && (
+                  <Button
+                    type="link"
+                    size="small"
+                    icon={<PlayCircleOutlined />}
+                    loading={resumingId === r.id}
+                    onClick={() => resume(r)}
+                  >
+                    继续生成
                   </Button>
                 )}
                 {!['QUEUED', 'RUNNING', 'WAITING_APPROVAL'].includes(r.status) && (

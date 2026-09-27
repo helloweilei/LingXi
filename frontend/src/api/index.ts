@@ -78,6 +78,8 @@ export interface AutoWriteReq {
   wordsPerChapter?: number;
   genOutline?: boolean;
   autoSummary?: boolean;
+  /** 从第 N 章续跑（失败任务断点续写用） */
+  startChapter?: number;
 }
 
 export const taskApi = {

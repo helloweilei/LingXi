@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Optional;
 
 @Service
 public class ChapterService {
@@ -35,6 +36,15 @@ public class ChapterService {
         Novel novel = novelService.loadOwned(novelId, user);
         return chapterRepository.findByNovelIdAndDeletedFalseOrderByChapterOrderAscIdAsc(novel.getId())
                 .stream().map(ChapterService::toMeta).toList();
+    }
+
+    /** 按章节序号查找（自动创作续跑用：判断该章是否已有内容 / 是否为失败残留的空壳） */
+    @Transactional(readOnly = true)
+    public Optional<MetaVO> findByNovelAndOrder(Long novelId, int order, User user) {
+        novelService.loadOwned(novelId, user);
+        return chapterRepository
+                .findFirstByNovelIdAndDeletedFalseAndChapterOrder(novelId, order)
+                .map(ChapterService::toMeta);
     }
 
     @Transactional

@@ -17,6 +17,9 @@ public interface ChapterRepository extends JpaRepository<Chapter, Long> {
     Optional<Chapter> findFirstByNovelIdAndDeletedFalseAndChapterOrderLessThanOrderByChapterOrderDescIdDesc(
             Long novelId, Integer chapterOrder);
 
+    /** 按序号查章节（供自动创作续跑时定位已生成/空壳章节） */
+    Optional<Chapter> findFirstByNovelIdAndDeletedFalseAndChapterOrder(Long novelId, Integer chapterOrder);
+
     long countByNovelIdAndDeletedFalse(Long novelId);
 
     void deleteByNovelId(Long novelId);

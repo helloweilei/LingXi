@@ -225,10 +225,31 @@ export default function AutoWritePanel({
           {
             title: '状态',
             dataIndex: 'status',
-            width: 110,
-            render: (s: string) => {
+            width: 300,
+            render: (s: string, r: WritingTaskVO) => {
               const t = STATUS_TAG[s] ?? { color: 'default', text: s };
-              return <Tag color={t.color}>{t.text}</Tag>;
+              return (
+                <Space size={6}>
+                  <Tag color={t.color}>{t.text}</Tag>
+                  {s === 'FAILED' && r.error && (
+                    <span
+                      className="muted"
+                      style={{
+                        fontSize: 12,
+                        maxWidth: 210,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        display: 'inline-block',
+                        verticalAlign: 'middle',
+                      }}
+                      title={r.error}
+                    >
+                      {r.error}
+                    </span>
+                  )}
+                </Space>
+              );
             },
           },
           {
@@ -297,7 +318,6 @@ export default function AutoWritePanel({
                     </Button>
                   </Popconfirm>
                 )}
-                {r.status === 'FAILED' && r.error && <span className="muted" style={{ fontSize: 12 }}>{r.error}</span>}
               </Space>
             ),
           },

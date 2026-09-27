@@ -42,6 +42,9 @@ import type {
 import AiDrawer from '../components/AiDrawer';
 import AutoWritePanel from '../components/AutoWritePanel';
 import NovelFormModal, { GENRES, NOVEL_STATUS } from '../components/NovelFormModal';
+import MDEditor from '@uiw/react-md-editor';
+import '@uiw/react-md-editor/markdown-editor.css';
+import '@uiw/react-markdown-preview/markdown.css';
 
 const ROLE_COLOR: Record<string, string> = {
   主角: 'magenta',
@@ -185,13 +188,19 @@ export default function NovelDetail() {
                     </Button>
                   </Space>
                 </div>
-                <Input.TextArea
-                  value={outline}
-                  onChange={(e) => setOutline(e.target.value)}
-                  rows={18}
-                  style={{ fontFamily: 'serif', fontSize: 15, lineHeight: 1.9 }}
-                  placeholder="在这里写下或让 AI 生成全书大纲：分卷、核心冲突、关键章节梗概……"
-                />
+                <div data-color-mode="light">
+                  <MDEditor
+                    value={outline}
+                    onChange={(v) => setOutline(v ?? '')}
+                    height="auto"
+                    preview="live"
+                    visibleDragbar={false}
+                    style={{ minHeight: 400 }}
+                    textareaProps={{
+                      placeholder: '在这里写下或让 AI 生成全书大纲：分卷、核心冲突、关键章节梗概……',
+                    }}
+                  />
+                </div>
               </div>
             ),
           },

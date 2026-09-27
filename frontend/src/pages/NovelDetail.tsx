@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { Key } from 'react';
 import {
   Button,
   Card,
@@ -252,6 +253,8 @@ function ChaptersTab({ novelId, refreshKey }: { novelId: number; refreshKey: num
   const [createOpen, setCreateOpen] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [creating, setCreating] = useState(false);
+  const [selectedKeys, setSelectedKeys] = useState<Key[]>([]);
+  const [batchDeleting, setBatchDeleting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -289,19 +292,55 @@ function ChaptersTab({ novelId, refreshKey }: { novelId: number; refreshKey: num
     load();
   };
 
+  const removeBatch = async () => {
+    if (selectedKeys.length === 0) {
+      return;
+    }
+    setBatchDeleting(true);
+    try {
+      await chapterApi.removeBatch(selectedKeys.map(Number));
+      message.success(`已删除 ${selectedKeys.length} 章`);
+      setSelectedKeys([]);
+      load();
+    } catch (e: any) {
+      message.error(e?.message ?? '批量删除失败');
+    } finally {
+      setBatchDeleting(false);
+    }
+  };
+
   return (
     <div className="section-card">
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 14 }}>
         <b>章节列表</b>
-        <Button type="primary" icon={<FileAddOutlined />} onClick={() => setCreateOpen(true)}>
-          新建章节
-        </Button>
+        <Space>
+          {selectedKeys.length > 0 && (
+            <Popconfirm
+              title={`删除选中的 ${selectedKeys.length} 章？`}
+              description="章节正文与历史版本会保留（软删除），后续可恢复。"
+              okText="删除"
+              okButtonProps={{ danger: true }}
+              onConfirm={removeBatch}
+            >
+              <Button danger icon={<DeleteOutlined />} loading={batchDeleting}>
+                批量删除（{selectedKeys.length}）
+              </Button>
+            </Popconfirm>
+          )}
+          <Button type="primary" icon={<FileAddOutlined />} onClick={() => setCreateOpen(true)}>
+            新建章节
+          </Button>
+        </Space>
       </div>
       <Table
         rowKey="id"
         loading={loading}
         dataSource={chapters}
         pagination={false}
+        rowSelection={{
+          selectedRowKeys: selectedKeys,
+          onChange: (keys) => setSelectedKeys(keys),
+        }}
         locale={{
           emptyText: <Empty description="还没有章节，点击右上角新建" />,
         }}

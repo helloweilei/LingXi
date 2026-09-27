@@ -1,5 +1,6 @@
 package com.lingxi.chapter;
 
+import com.lingxi.chapter.dto.ChapterDtos.BatchDeleteReq;
 import com.lingxi.chapter.dto.ChapterDtos.MetaVO;
 import com.lingxi.chapter.dto.ChapterDtos.SaveReq;
 import com.lingxi.chapter.dto.ChapterDtos.VO;
@@ -52,6 +53,14 @@ public class ChapterController {
     @DeleteMapping("/api/chapters/{id}")
     public ApiResponse<Void> delete(@AuthenticationPrincipal User user, @PathVariable Long id) {
         chapterService.delete(id, user);
+        return ApiResponse.ok();
+    }
+
+    /** 批量软删除章节（一次校验、循环标记删除，正文与版本保留可恢复） */
+    @PostMapping("/api/chapters/batch-delete")
+    public ApiResponse<Void> deleteBatch(@AuthenticationPrincipal User user,
+                                         @Valid @RequestBody BatchDeleteReq req) {
+        chapterService.deleteBatch(req.ids(), user);
         return ApiResponse.ok();
     }
 

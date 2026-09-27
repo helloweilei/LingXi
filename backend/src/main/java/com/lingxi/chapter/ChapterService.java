@@ -98,6 +98,17 @@ public class ChapterService {
         novel.setWordCount(Math.max(0, novel.getWordCount() - chapter.getWordCount()));
     }
 
+    /** 批量软删除：逐个校验属主后标记删除（与单删同一语义，正文与版本保留可恢复） */
+    @Transactional
+    public void deleteBatch(List<Long> chapterIds, User user) {
+        if (chapterIds == null || chapterIds.isEmpty()) {
+            return;
+        }
+        for (Long id : chapterIds) {
+            delete(id, user);
+        }
+    }
+
     /** 恢复已软删除的章节 */
     @Transactional
     public void restore(Long chapterId, User user) {

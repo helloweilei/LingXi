@@ -43,6 +43,7 @@ export const chapterApi = {
   get: (id: number) => get<Chapter>(`/chapters/${id}`),
   save: (id: number, req: { title?: string; content?: string }) => put<Chapter>(`/chapters/${id}`, req),
   remove: (id: number) => del(`/chapters/${id}`),
+  removeBatch: (ids: number[]) => post<void>(`/chapters/batch-delete`, { ids }),
 };
 
 export const characterApi = {

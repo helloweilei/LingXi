@@ -170,7 +170,10 @@ public class AutoWriteService {
                 return;
             }
             task.setStatus(WritingTaskStatus.RUNNING);
-            taskRepository.save(task);
+            saveTask(task);
+            if (task.getStatus() != WritingTaskStatus.RUNNING) {
+                return; // 启动瞬间用户已取消：保持取消状态
+            }
 
             Novel novel = novelService.loadOwned(task.getNovelId(), user);
             Params p = readParams(task.getParams());
@@ -182,7 +185,7 @@ public class AutoWriteService {
                     novelService.update(novel.getId(), user,
                             new UpdateReq(null, null, null, null, null, null, outline));
                     task.setGeneratedOutline(true);
-                    taskRepository.save(task);
+                    saveTask(task);
                 }
             }
 
@@ -191,7 +194,7 @@ public class AutoWriteService {
                 int next = task.getCurrentChapter() + 1;
                 var ch = chapterService.create(novel.getId(), user, new SaveReq(null, null, null));
                 appendCreatedChapter(task, ch.id());
-                taskRepository.save(task); // 先记录章节归属：中途失败也能被删除任务清理
+                saveTask(task); // 先记录章节归属：中途失败也能被删除任务清理
                 String content = collect(aiService.writeChapter(novel.getId(), ch.id(), p.wordsPerChapter, user));
                 if (content.isBlank()) {
                     throw new BizException(502, "AI 未生成正文（第 " + next + " 章）", 502);
@@ -202,7 +205,7 @@ public class AutoWriteService {
                 task.setCurrentChapter(next);
                 task.setCurrentTitle(title);
                 task.setError(null);
-                taskRepository.save(task);
+                saveTask(task);
 
                 if (p.autoSummary) {
                     collect(aiService.summarize(novel.getId(), ch.id(), user));
@@ -211,21 +214,46 @@ public class AutoWriteService {
                 // CONFIRM 模式：每完成一章即挂起，等待用户批准
                 if ("CONFIRM".equals(task.getMode()) && next < task.getTotalChapters()) {
                     task.setStatus(WritingTaskStatus.WAITING_APPROVAL);
-                    taskRepository.save(task);
+                    saveTask(task);
                     return;
                 }
             }
             task.setStatus(task.getCurrentChapter() >= task.getTotalChapters()
                     ? WritingTaskStatus.DONE : WritingTaskStatus.CANCELLED);
-            taskRepository.save(task);
+            saveTask(task);
         } catch (Exception e) {
             log.error("Auto write task {} failed: {}", taskId, e.toString());
             taskRepository.findById(taskId).ifPresent(t -> {
+                if (t.getStatus() == WritingTaskStatus.CANCELLED) {
+                    return; // 用户已取消：保持取消状态，不覆盖为失败
+                }
                 t.setStatus(WritingTaskStatus.FAILED);
                 t.setError(shortMsg(e));
                 taskRepository.save(t);
             });
         }
+    }
+
+    /**
+     * 保存任务进度：先重读数据库状态，防止执行器用内存中的旧状态覆盖用户操作。
+     * - 用户已取消（CANCELLED）或任务已失败（FAILED）时，保持数据库状态，不回写；
+     * - 任务行已被删除时，不再保存（避免把已删除的任务“复活”）。
+     */
+    private void saveTask(WritingTask task) {
+        taskRepository.findById(task.getId()).ifPresent(cur -> {
+            task.setStatus(mergeSavedStatus(task.getStatus(), cur.getStatus()));
+            taskRepository.save(task);
+        });
+    }
+
+    /**
+     * 合并待保存状态：数据库已是终态（用户取消/任务失败）时，内存中的旧状态不得覆盖。
+     */
+    static WritingTaskStatus mergeSavedStatus(WritingTaskStatus memory, WritingTaskStatus db) {
+        if (db == WritingTaskStatus.CANCELLED || db == WritingTaskStatus.FAILED) {
+            return db;
+        }
+        return memory;
     }
 
     /** 每次迭代前重读状态：支持用户取消（CANCELLED 立即停） */

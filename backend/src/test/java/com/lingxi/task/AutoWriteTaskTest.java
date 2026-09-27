@@ -57,4 +57,19 @@ class AutoWriteTaskTest {
         assertTrue(AutoWriteService.parseIds("").isEmpty());
         assertTrue(AutoWriteService.parseIds(null).isEmpty());
     }
+
+    @Test
+    void progressSaveNeverOverridesUserCancelledOrFailed() {
+        // 用户已取消：执行器内存中的 RUNNING 不得回写覆盖
+        assertEquals(WritingTaskStatus.CANCELLED,
+                AutoWriteService.mergeSavedStatus(WritingTaskStatus.RUNNING, WritingTaskStatus.CANCELLED));
+        // 任务已失败：不得被内存中的旧状态覆盖
+        assertEquals(WritingTaskStatus.FAILED,
+                AutoWriteService.mergeSavedStatus(WritingTaskStatus.DONE, WritingTaskStatus.FAILED));
+        // 正常进行中：内存状态照常保存
+        assertEquals(WritingTaskStatus.DONE,
+                AutoWriteService.mergeSavedStatus(WritingTaskStatus.DONE, WritingTaskStatus.RUNNING));
+        assertEquals(WritingTaskStatus.RUNNING,
+                AutoWriteService.mergeSavedStatus(WritingTaskStatus.RUNNING, WritingTaskStatus.QUEUED));
+    }
 }

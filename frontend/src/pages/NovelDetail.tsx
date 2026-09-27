@@ -32,7 +32,13 @@ import {
 } from "@ant-design/icons";
 import { useNavigate, useParams } from "react-router-dom";
 import dayjs from "dayjs";
-import { chapterApi, characterApi, novelApi, uploadApi, worldApi } from "../api";
+import {
+  chapterApi,
+  characterApi,
+  novelApi,
+  uploadApi,
+  worldApi,
+} from "../api";
 import { streamSse } from "../api/ai";
 import type {
   ChapterMeta,
@@ -138,7 +144,9 @@ export default function NovelDetail() {
                   </Tag>
                 ))}
               <Tag>{novel.status ?? "草稿"}</Tag>
-              {novel.languageStyle && <Tag color="cyan">{novel.languageStyle}</Tag>}
+              {novel.languageStyle && (
+                <Tag color="cyan">{novel.languageStyle}</Tag>
+              )}
               <Button
                 type="link"
                 icon={<EditOutlined />}
@@ -322,7 +330,13 @@ export default function NovelDetail() {
 /* ---------------- 章节 ---------------- */
 
 /** 详情页左侧封面：有图显示图片，无图用主题色 + 书名首字占位；点击进入设置 */
-function CoverBox({ novel, onClick }: { novel: NovelDetail; onClick: () => void }) {
+function CoverBox({
+  novel,
+  onClick,
+}: {
+  novel: NovelDetail;
+  onClick: () => void;
+}) {
   const bg = novel.coverColor || "#6a5acd";
   return (
     <div
@@ -343,7 +357,12 @@ function CoverBox({ novel, onClick }: { novel: NovelDetail; onClick: () => void 
         <img
           src={novel.coverUrl}
           alt="封面"
-          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+          style={{
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            display: "block",
+          }}
         />
       ) : (
         <div
@@ -404,7 +423,9 @@ function CoverModal({
   const save = async () => {
     setSaving(true);
     try {
-      const saved = await novelApi.update(novel.id, { coverUrl: coverUrl ?? "" });
+      const saved = await novelApi.update(novel.id, {
+        coverUrl: coverUrl ?? "",
+      });
       onSaved(saved);
       onClose();
     } catch (e: any) {
@@ -435,7 +456,11 @@ function CoverModal({
           }}
         >
           {coverUrl ? (
-            <img src={coverUrl} alt="预览" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            <img
+              src={coverUrl}
+              alt="预览"
+              style={{ width: "100%", height: "100%", objectFit: "cover" }}
+            />
           ) : (
             <div
               style={{
@@ -478,7 +503,12 @@ function CoverModal({
             支持 jpg/png/webp/gif，≤ 5MB
           </p>
           {coverUrl && (
-            <Button type="link" danger style={{ paddingLeft: 0 }} onClick={() => setCoverUrl(null)}>
+            <Button
+              type="link"
+              danger
+              style={{ paddingLeft: 0 }}
+              onClick={() => setCoverUrl(null)}
+            >
               移除封面
             </Button>
           )}
@@ -635,7 +665,7 @@ function ChaptersTab({
                   size="small"
                   onClick={() => navigate(`/write/${r.id}`)}
                 >
-                  写作
+                  编辑
                 </Button>
                 <Popconfirm
                   title="确定删除这一章？"

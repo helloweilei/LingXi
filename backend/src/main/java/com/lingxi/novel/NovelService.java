@@ -4,7 +4,7 @@ import com.lingxi.chapter.ChapterRepository;
 import com.lingxi.chapter.ChapterVersionRepository;
 import com.lingxi.character.CharacterRepository;
 import com.lingxi.common.BizException;
-import com.lingxi.memory.ChapterSummaryRepository;
+import com.lingxi.memory.ChapterOutlineRepository;
 import com.lingxi.memory.StoryMemoryRepository;
 import com.lingxi.novel.dto.NovelDtos.CreateReq;
 import com.lingxi.novel.dto.NovelDtos.DetailVO;
@@ -31,19 +31,19 @@ public class NovelService {
     private final ChapterVersionRepository chapterVersionRepository;
     private final CharacterRepository characterRepository;
     private final WorldSettingRepository worldSettingRepository;
-    private final ChapterSummaryRepository chapterSummaryRepository;
+    private final ChapterOutlineRepository chapterOutlineRepository;
     private final StoryMemoryRepository storyMemoryRepository;
 
     public NovelService(NovelRepository novelRepository, ChapterRepository chapterRepository,
                         ChapterVersionRepository chapterVersionRepository,
                         CharacterRepository characterRepository, WorldSettingRepository worldSettingRepository,
-                        ChapterSummaryRepository chapterSummaryRepository, StoryMemoryRepository storyMemoryRepository) {
+                        ChapterOutlineRepository chapterOutlineRepository, StoryMemoryRepository storyMemoryRepository) {
         this.novelRepository = novelRepository;
         this.chapterRepository = chapterRepository;
         this.chapterVersionRepository = chapterVersionRepository;
         this.characterRepository = characterRepository;
         this.worldSettingRepository = worldSettingRepository;
-        this.chapterSummaryRepository = chapterSummaryRepository;
+        this.chapterOutlineRepository = chapterOutlineRepository;
         this.storyMemoryRepository = storyMemoryRepository;
     }
 
@@ -116,7 +116,7 @@ public class NovelService {
         }
         characterRepository.deleteByNovelId(novelId);
         worldSettingRepository.deleteByNovelId(novelId);
-        chapterSummaryRepository.deleteByNovelId(novelId);
+        chapterOutlineRepository.deleteByNovelId(novelId);
         storyMemoryRepository.deleteByNovelId(novelId);
         novelRepository.delete(novel);
     }

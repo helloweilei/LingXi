@@ -15,9 +15,8 @@ public final class WritingTaskDtos {
     public record AutoWriteReq(
             @Pattern(regexp = "AUTO|CONFIRM", message = "mode 仅支持 AUTO 或 CONFIRM") String mode,
             @Min(value = 1, message = "章节数最少 1 章") @Max(value = 50, message = "单次最多 50 章") Integer chapters,
-            @Min(value = 300, message = "每章字数最少 300 字") @Max(value = 5000, message = "每章字数最多 5000 字") Integer wordsPerChapter,
             Boolean genOutline,
-            Boolean autoSummary,
+            Boolean autoOutline,
             /** 从第 N 章开始续跑（跳过前面的章节，用于失败任务断点续写） */
             @Min(value = 1, message = "起始章节最少为第 1 章") Integer startChapter) {
     }
@@ -25,7 +24,7 @@ public final class WritingTaskDtos {
     /** 任务视图（不含敏感信息） */
     public record TaskVO(Long id, Long novelId, String mode, String status,
                          Integer totalChapters, Integer currentChapter, String currentTitle,
-                         Integer chapters, Integer wordsPerChapter, Boolean genOutline, Boolean autoSummary,
+                         Integer chapters, Boolean genOutline, Boolean autoOutline,
                          String error, LocalDateTime createdAt, LocalDateTime updatedAt) {
     }
 }

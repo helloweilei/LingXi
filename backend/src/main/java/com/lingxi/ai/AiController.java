@@ -74,12 +74,24 @@ public class AiController {
         return toSse(aiService.chat(novelId, req, user));
     }
 
-    /** 生成章节摘要：流式输出，完成后自动写入该章的记忆（chapter_summaries） */
-    @PostMapping(value = "/novels/{novelId}/chapters/{chapterId}/summarize", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<ServerSentEvent<String>> summarize(@AuthenticationPrincipal User user,
-                                                   @PathVariable Long novelId,
-                                                   @PathVariable Long chapterId) {
-        return toSse(aiService.summarize(novelId, chapterId, user));
+    /** 生成章节大纲：流式输出，完成后自动写入该章大纲（chapter_outlines），用于创作前规划 */
+    @PostMapping(value = "/novels/{novelId}/chapters/{chapterId}/outline", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<ServerSentEvent<String>> generateChapterOutline(@AuthenticationPrincipal User user,
+                                                               @PathVariable Long novelId,
+                                                               @PathVariable Long chapterId) {
+        return toSse(aiService.generateChapterOutline(novelId, chapterId, user));
+    }
+
+    /**
+     * 根据章节大纲生成整章正文：流式输出，并在完成后整章覆盖写入（旧内容由 ChapterService 自动留版本快照）。
+     * 每章目标字数由后端按“总目标字数 / 章节数”动态计算，前端无需也不应传入字数。
+     * 章节已存在正文时，前端应先弹确认提示覆盖风险再调用。
+     */
+    @PostMapping(value = "/novels/{novelId}/chapters/{chapterId}/write", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<ServerSentEvent<String>> writeChapter(@AuthenticationPrincipal User user,
+                                                      @PathVariable Long novelId,
+                                                      @PathVariable Long chapterId) {
+        return toSse(aiService.writeChapterAndSave(novelId, chapterId, user));
     }
 
     private Flux<ServerSentEvent<String>> toSse(Flux<String> deltas) {

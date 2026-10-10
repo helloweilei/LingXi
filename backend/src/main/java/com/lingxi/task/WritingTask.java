@@ -41,7 +41,7 @@ public class WritingTask {
 
     @Lob
     @Column
-    private String params; // JSON：{chapters, wordsPerChapter, genOutline, autoSummary}
+    private String params; // JSON：{chapters, wordsPerChapter, genOutline, autoOutline}
 
     @Column(name = "total_chapters", nullable = false)
     private Integer totalChapters = 0;

@@ -2,7 +2,7 @@ package com.lingxi.ai;
 
 import com.lingxi.character.NovelCharacter;
 import com.lingxi.config.AiProperties;
-import com.lingxi.memory.ChapterSummary;
+import com.lingxi.memory.ChapterOutline;
 import com.lingxi.memory.StoryMemory;
 import com.lingxi.novel.Novel;
 import com.lingxi.world.WorldSetting;
@@ -59,21 +59,21 @@ class ContextBuilderTest {
     }
 
     @Test
-    void summariesLimitedToRecentCount() {
-        List<ChapterSummary> summaries = new ArrayList<>();
+    void outlinesLimitedToRecentCount() {
+        List<ChapterOutline> outlines = new ArrayList<>();
         for (int i = 0; i < 20; i++) {
-            ChapterSummary s = new ChapterSummary();
-            s.setSummary("第" + i + "章摘要内容");
-            summaries.add(s);
+            ChapterOutline o = new ChapterOutline();
+            o.setOutline("第" + i + "章大纲内容");
+            outlines.add(o);
         }
-        String base = builder.buildBase(novel(), List.of(), List.of(), null, summaries);
+        String base = builder.buildBase(novel(), List.of(), List.of(), null, outlines);
         int count = 0;
         for (String line : base.split("\n")) {
-            if (line.startsWith("- 第") && line.endsWith("章摘要内容")) {
+            if (line.startsWith("- 第") && line.endsWith("章大纲内容")) {
                 count++;
             }
         }
-        assertThat(count).isEqualTo(props.getMaxRecentSummaries());
+        assertThat(count).isEqualTo(props.getMaxRecentOutlines());
     }
 
     @Test

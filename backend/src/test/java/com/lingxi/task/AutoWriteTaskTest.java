@@ -32,12 +32,11 @@ class AutoWriteTaskTest {
 
     @Test
     void paramsJsonRoundTripPreservesIntent() throws Exception {
-        String json = objectMapper.writeValueAsString(new AutoWriteService.Params(8, 1500, true, false));
+        String json = objectMapper.writeValueAsString(new AutoWriteService.Params(8, true, false));
         AutoWriteService.Params back = objectMapper.readValue(json, AutoWriteService.Params.class);
         assertEquals(8, back.chapters());
-        assertEquals(1500, back.wordsPerChapter());
         assertTrue(back.genOutline());
-        assertEquals(false, back.autoSummary());
+        assertEquals(false, back.autoOutline());
     }
 
     @Test

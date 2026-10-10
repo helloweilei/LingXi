@@ -6,7 +6,7 @@ import com.lingxi.ai.AiService;
 import com.lingxi.chapter.ChapterService;
 import com.lingxi.chapter.dto.ChapterDtos.SaveReq;
 import com.lingxi.common.BizException;
-import com.lingxi.memory.ChapterSummaryRepository;
+import com.lingxi.memory.ChapterOutlineRepository;
 import com.lingxi.novel.Novel;
 import com.lingxi.novel.NovelService;
 import com.lingxi.novel.dto.NovelDtos.UpdateReq;
@@ -29,7 +29,7 @@ import java.util.concurrent.Executors;
 /**
  * 自动创作流水线：
  * 1. （可选）先生成全书大纲并写入作品；
- * 2. 逐章：建空章节 → AI 生成整章正文 → 落库（reason=ai 快照）→（可选）生成摘要；
+ * 2. 逐章：建空章节 →（可选）先生成章节大纲（写作前规划）→ AI 按大纲生成整章正文 → 落库（reason=ai 快照）；
  * 3. AUTO 模式一气呵成；CONFIRM 模式每章后进入 WAITING_APPROVAL，等用户批准再继续。
  * 状态机：QUEUED → RUNNING →（CONFIRM）WAITING_APPROVAL → … → DONE / FAILED / CANCELLED
  */
@@ -45,7 +45,7 @@ public class AutoWriteService {
     private final NovelService novelService;
     private final ChapterService chapterService;
     private final AiService aiService;
-    private final ChapterSummaryRepository chapterSummaryRepository;
+    private final ChapterOutlineRepository chapterOutlineRepository;
     private final ObjectMapper objectMapper;
 
     /** 全局串行执行池（2 线程）：任务在池内排队执行，天然避免同一本书并发写冲突 */
@@ -57,12 +57,12 @@ public class AutoWriteService {
 
     public AutoWriteService(WritingTaskRepository taskRepository, NovelService novelService,
                             ChapterService chapterService, AiService aiService,
-                            ChapterSummaryRepository chapterSummaryRepository, ObjectMapper objectMapper) {
+                            ChapterOutlineRepository chapterOutlineRepository, ObjectMapper objectMapper) {
         this.taskRepository = taskRepository;
         this.novelService = novelService;
         this.chapterService = chapterService;
         this.aiService = aiService;
-        this.chapterSummaryRepository = chapterSummaryRepository;
+        this.chapterOutlineRepository = chapterOutlineRepository;
         this.objectMapper = objectMapper;
     }
 
@@ -76,14 +76,10 @@ public class AutoWriteService {
     public TaskVO start(Long novelId, User user, AutoWriteReq req) {
         novelService.loadOwned(novelId, user);
         int chapters = req.chapters() == null ? 5 : req.chapters();
-        int wordsPerChapter = req.wordsPerChapter() == null ? 1200 : req.wordsPerChapter();
         String mode = req.mode() == null ? "AUTO" : req.mode();
         int startChapter = req.startChapter() == null ? 1 : req.startChapter();
         if (chapters < 1 || chapters > 50) {
             throw new BizException(400, "章节数需在 1-50 之间", 400);
-        }
-        if (wordsPerChapter < 300 || wordsPerChapter > 5000) {
-            throw new BizException(400, "每章字数需在 300-5000 之间", 400);
         }
         if (startChapter < 1 || startChapter > chapters) {
             throw new BizException(400, "起始章节需在 1-" + chapters + " 之间", 400);
@@ -91,8 +87,8 @@ public class AutoWriteService {
         if (taskRepository.existsByNovelIdAndStatusIn(novelId, ACTIVE)) {
             throw new BizException(409, "该书已有进行中的自动创作任务，请先等待或取消", 409);
         }
-        Params params = new Params(chapters, wordsPerChapter,
-                req.genOutline() == null || req.genOutline(), req.autoSummary() == null || req.autoSummary());
+        Params params = new Params(chapters,
+                req.genOutline() == null || req.genOutline(), req.autoOutline() == null || req.autoOutline());
         WritingTask task = new WritingTask();
         task.setNovelId(novelId);
         task.setUserId(user.getId());
@@ -133,7 +129,7 @@ public class AutoWriteService {
     /**
      * 删除任务并移除其生成的内容：
      * 1. 软删本任务创建的章节（正文与版本快照保留，可恢复）；
-     * 2. 清理这些章节的 AI 摘要；
+     * 2. 清理这些章节的 AI 大纲；
      * 3. 若本任务实际生成过全书大纲，则清空大纲（旧大纲在生成时已被覆盖，无法还原）。
      * 仅终态（DONE/FAILED/CANCELLED）任务允许删除。
      */
@@ -145,7 +141,7 @@ public class AutoWriteService {
         }
         for (Long cid : parseIds(task.getCreatedChapters())) {
             chapterService.delete(cid, user);
-            chapterSummaryRepository.deleteByChapterId(cid);
+            chapterOutlineRepository.deleteByChapterId(cid);
         }
         if (Boolean.TRUE.equals(task.getGeneratedOutline())) {
             Novel novel = novelService.loadOwned(task.getNovelId(), user);
@@ -222,28 +218,29 @@ public class AutoWriteService {
                     saveTask(task); // 先记录章节归属：中途失败也能被删除任务清理
                 }
                 // 生成整章正文；LLM 偶发空响应时自动重试（共 3 次）
+                // 写前先生成章节大纲（规划）：若开启 autoOutline，先产出本章大纲并落库，
+                // 随后 writeChapter 会读取该大纲，严格按规划写正文，避免跑偏、收尾失控。
+                if (p.autoOutline) {
+                    collect(aiService.generateChapterOutline(novel.getId(), chapterId, user));
+                }
                 String content = null;
                 for (int attempt = 1; attempt <= 3 && (content == null || content.isBlank()); attempt++) {
                     if (attempt > 1) {
                         log.warn("Auto write novel {} chapter {} returned blank content, retry {}/3",
                                 novel.getId(), next, attempt);
                     }
-                    content = collect(aiService.writeChapter(novel.getId(), chapterId, p.wordsPerChapter, user));
+                    content = collect(aiService.writeChapter(novel.getId(), chapterId, user));
                 }
                 if (content.isBlank()) {
                     throw new BizException(502, "AI 未生成正文（第 " + next + " 章）", 502);
                 }
-                String title = "第" + chapterOrder + "章";
+                String title = "第" + chapterOrder + " 章";
                 chapterService.save(chapterId, user, new SaveReq(title, content, "ai"));
 
                 task.setCurrentChapter(next);
                 task.setCurrentTitle(title);
                 task.setError(null);
                 saveTask(task);
-
-                if (p.autoSummary) {
-                    collect(aiService.summarize(novel.getId(), chapterId, user));
-                }
 
                 // CONFIRM 模式：每完成一章即挂起，等待用户批准
                 if ("CONFIRM".equals(task.getMode()) && next < task.getTotalChapters()) {
@@ -342,7 +339,7 @@ public class AutoWriteService {
         try {
             return objectMapper.readValue(json, Params.class);
         } catch (Exception e) {
-            return new Params(5, 1200, false, false);
+            return new Params(5, false, false);
         }
     }
 
@@ -355,11 +352,11 @@ public class AutoWriteService {
         Params p = readParams(t.getParams());
         return new TaskVO(t.getId(), t.getNovelId(), t.getMode(), t.getStatus().name(),
                 t.getTotalChapters(), t.getCurrentChapter(), t.getCurrentTitle(),
-                p.chapters, p.wordsPerChapter, p.genOutline, p.autoSummary,
+                p.chapters, p.genOutline, p.autoOutline,
                 t.getError(), t.getCreatedAt(), t.getUpdatedAt());
     }
 
     /** 任务参数（与 DB 中 params JSON 对应） */
-    record Params(int chapters, int wordsPerChapter, boolean genOutline, boolean autoSummary) {
+    record Params(int chapters, boolean genOutline, boolean autoOutline) {
     }
 }

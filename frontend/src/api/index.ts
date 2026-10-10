@@ -4,6 +4,7 @@ import type {
   AuthResp,
   Chapter,
   ChapterMeta,
+  ChapterOutlineItem,
   CharacterVO,
   Novel,
   NovelDetail,
@@ -83,12 +84,26 @@ export const uploadApi = {
   },
 };
 
+export const outlineApi = {
+  /** 章节大纲列表：每个章节一行，含是否已生成 */
+  list: (novelId: number) => get<ChapterOutlineItem[]>(`/novels/${novelId}/outlines`),
+  /** 一键 / 批量生成大纲；不传 chapterIds 则生成全书未生成大纲的章节 */
+  generate: (novelId: number, chapterIds?: number[]) =>
+    post<ChapterOutlineItem[]>(`/novels/${novelId}/outlines/generate`, chapterIds ? { chapterIds } : {}),
+  /** 手动新增 / 编辑单章大纲 */
+  save: (novelId: number, chapterId: number, outline: string) =>
+    put<void>(`/novels/${novelId}/outlines/${chapterId}`, { outline }),
+  /** 删除单章大纲 */
+  remove: (novelId: number, chapterId: number) =>
+    del(`/novels/${novelId}/outlines/${chapterId}`),
+};
+
 export interface AutoWriteReq {
   mode: string;
   chapters?: number;
   wordsPerChapter?: number;
   genOutline?: boolean;
-  autoSummary?: boolean;
+  autoOutline?: boolean;
   /** 从第 N 章续跑（失败任务断点续写用） */
   startChapter?: number;
 }

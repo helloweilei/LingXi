@@ -2,7 +2,7 @@ package com.lingxi.ai;
 
 import com.lingxi.character.NovelCharacter;
 import com.lingxi.config.AiProperties;
-import com.lingxi.memory.ChapterSummary;
+import com.lingxi.memory.ChapterOutline;
 import com.lingxi.memory.StoryMemory;
 import com.lingxi.novel.Novel;
 import com.lingxi.world.WorldSetting;
@@ -12,7 +12,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 上下文构建器：把"作品信息 → 一致性卡片 → 全书大纲 → 故事脑 → 近期章节摘要"
+ * 上下文构建器：把"作品信息 → 一致性卡片 → 全书大纲 → 故事脑 → 已规划章节大纲"
  * 按优先级打包进设定的字符预算（中文约 1 字 ≈ 1 token）。
  * 预算耗尽时按优先级从低到高丢弃/压缩，保证核心设定始终在场。
  */
@@ -24,18 +24,18 @@ public class ContextBuilder {
     private static final int CARD_BUDGET = 1200;
     private static final int OUTLINE_BUDGET = 2800;
     private static final int BRAIN_BUDGET = 1600;
-    private static final int SUMMARY_BUDGET = 1600;
-    private static final int SUMMARY_ENTRY_BUDGET = 300;
+    private static final int OUTLINE_CHAIN_BUDGET = 1600;
+    private static final int OUTLINE_CHAIN_ENTRY_BUDGET = 300;
     private static final int CARD_DESC_BUDGET = 80;
     private static final int CARD_WORLD_BUDGET = 120;
     private static final String ELLIPSIS = "……（略）……";
 
     private final int totalBudget;
-    private final int maxRecentSummaries;
+    private final int maxRecentOutlines;
 
     public ContextBuilder(AiProperties props) {
         this.totalBudget = Math.max(1000, props.getContextBudgetChars());
-        this.maxRecentSummaries = Math.max(1, props.getMaxRecentSummaries());
+        this.maxRecentOutlines = Math.max(1, props.getMaxRecentSummaries());
     }
 
     /** 作品信息 + 大纲（历史兼容入口，供单任务使用） */
@@ -45,13 +45,13 @@ public class ContextBuilder {
 
     /** 按优先级打包全部静态上下文段 */
     public String buildBase(Novel novel, List<NovelCharacter> characters, List<WorldSetting> worlds,
-                            StoryMemory memory, List<ChapterSummary> summaries) {
+                            StoryMemory memory, List<ChapterOutline> outlines) {
         List<Section> sections = new ArrayList<>();
         sections.add(new Section(buildInfo(novel), INFO_BUDGET));
         sections.add(new Section(buildConsistencyCard(characters, worlds), CARD_BUDGET));
         sections.add(new Section(buildOutline(novel), OUTLINE_BUDGET));
         sections.add(new Section(buildBrain(memory), BRAIN_BUDGET));
-        sections.add(new Section(buildSummaries(summaries), SUMMARY_BUDGET));
+        sections.add(new Section(buildOutlines(outlines), OUTLINE_CHAIN_BUDGET));
 
         StringBuilder sb = new StringBuilder();
         int remaining = totalBudget;
@@ -119,15 +119,15 @@ public class ContextBuilder {
         return "【故事脑：已发生的关键剧情与未回收伏笔】\n" + memory.getStoryBrain();
     }
 
-    private String buildSummaries(List<ChapterSummary> summaries) {
-        if (summaries == null || summaries.isEmpty()) {
+    private String buildOutlines(List<ChapterOutline> outlines) {
+        if (outlines == null || outlines.isEmpty()) {
             return "";
         }
-        StringBuilder sb = new StringBuilder("【近期章节进展】\n");
-        int from = Math.max(0, summaries.size() - maxRecentSummaries);
-        for (int i = from; i < summaries.size(); i++) {
-            ChapterSummary s = summaries.get(i);
-            sb.append("- ").append(trimTail(s.getSummary(), SUMMARY_ENTRY_BUDGET)).append("\n");
+        StringBuilder sb = new StringBuilder("【已规划章节大纲】\n");
+        int from = Math.max(0, outlines.size() - maxRecentOutlines);
+        for (int i = from; i < outlines.size(); i++) {
+            ChapterOutline o = outlines.get(i);
+            sb.append("- ").append(trimTail(o.getOutline(), OUTLINE_CHAIN_ENTRY_BUDGET)).append("\n");
         }
         return sb.toString().trim();
     }

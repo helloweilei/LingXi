@@ -13,12 +13,13 @@ import jakarta.persistence.Table;
 import java.time.LocalDateTime;
 
 /**
- * 章节摘要：每章生成/完稿后沉淀 150-200 字摘要，供 AI 跨章记忆与上下文注入。
+ * 章节大纲：每章在创作前沉淀的“写作规划”（场景节拍、关键进展、人物弧光、收尾钩子），
+ * 用于指导 AI 与作者按图施工，避免正文跑偏、收尾失控。
  * 每章至多一条（chapter_id 唯一），可反复覆盖更新。
  */
 @Entity
-@Table(name = "chapter_summaries")
-public class ChapterSummary {
+@Table(name = "chapter_outlines")
+public class ChapterOutline {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -31,8 +32,8 @@ public class ChapterSummary {
     private Long chapterId;
 
     @Lob
-    @Column(name = "summary", nullable = false)
-    private String summary;
+    @Column(name = "outline", nullable = false)
+    private String outline;
 
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
@@ -71,12 +72,12 @@ public class ChapterSummary {
         this.chapterId = chapterId;
     }
 
-    public String getSummary() {
-        return summary;
+    public String getOutline() {
+        return outline;
     }
 
-    public void setSummary(String summary) {
-        this.summary = summary;
+    public void setOutline(String outline) {
+        this.outline = outline;
     }
 
     public LocalDateTime getCreatedAt() {

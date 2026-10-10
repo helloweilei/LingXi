@@ -65,6 +65,19 @@ export interface ChatMsg {
   content: string;
 }
 
+export interface ChapterOutlineItem {
+  chapterId: number;
+  chapterOrder: number;
+  chapterTitle: string;
+  /** 每章计划字数 = 总目标字数 / 章节数（后端动态计算） */
+  wordCount: number | null;
+  /** 该章是否已写正文（用于覆盖生成前的提示） */
+  hasContent: boolean;
+  hasOutline: boolean;
+  outline: string | null;
+  updatedAt: string | null;
+}
+
 export interface AiConfigVO {
   provider: string;
   baseUrl: string;
@@ -85,7 +98,7 @@ export interface WritingTaskVO {
   chapters: number;
   wordsPerChapter: number;
   genOutline: boolean;
-  autoSummary: boolean;
+  autoOutline: boolean;
   error: string | null;
   createdAt: string;
   updatedAt: string;

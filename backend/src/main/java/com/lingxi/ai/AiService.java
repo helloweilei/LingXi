@@ -3,11 +3,13 @@ package com.lingxi.ai;
 import com.lingxi.ai.dto.AiDtos.ChatReq;
 import com.lingxi.chapter.Chapter;
 import com.lingxi.chapter.ChapterRepository;
+import com.lingxi.chapter.ChapterService;
+import com.lingxi.chapter.dto.ChapterDtos.SaveReq;
 import com.lingxi.character.CharacterRepository;
 import com.lingxi.character.NovelCharacter;
 import com.lingxi.common.BizException;
-import com.lingxi.memory.ChapterSummary;
-import com.lingxi.memory.ChapterSummaryRepository;
+import com.lingxi.memory.ChapterOutline;
+import com.lingxi.memory.ChapterOutlineRepository;
 import com.lingxi.memory.StoryMemory;
 import com.lingxi.memory.StoryMemoryRepository;
 import com.lingxi.novel.Novel;
@@ -34,23 +36,26 @@ public class AiService {
     private final LlmClientProvider llmClientProvider;
     private final NovelService novelService;
     private final ChapterRepository chapterRepository;
+    private final ChapterService chapterService;
     private final CharacterRepository characterRepository;
     private final WorldSettingRepository worldSettingRepository;
-    private final ChapterSummaryRepository chapterSummaryRepository;
+    private final ChapterOutlineRepository chapterOutlineRepository;
     private final StoryMemoryRepository storyMemoryRepository;
     private final ContextBuilder contextBuilder;
 
     public AiService(LlmClientProvider llmClientProvider, NovelService novelService,
-                     ChapterRepository chapterRepository, CharacterRepository characterRepository,
+                     ChapterRepository chapterRepository, ChapterService chapterService,
+                     CharacterRepository characterRepository,
                      WorldSettingRepository worldSettingRepository,
-                     ChapterSummaryRepository chapterSummaryRepository, StoryMemoryRepository storyMemoryRepository,
+                     ChapterOutlineRepository chapterOutlineRepository, StoryMemoryRepository storyMemoryRepository,
                      ContextBuilder contextBuilder) {
         this.llmClientProvider = llmClientProvider;
         this.novelService = novelService;
         this.chapterRepository = chapterRepository;
+        this.chapterService = chapterService;
         this.characterRepository = characterRepository;
         this.worldSettingRepository = worldSettingRepository;
-        this.chapterSummaryRepository = chapterSummaryRepository;
+        this.chapterOutlineRepository = chapterOutlineRepository;
         this.storyMemoryRepository = storyMemoryRepository;
         this.contextBuilder = contextBuilder;
     }
@@ -117,8 +122,9 @@ public class AiService {
      * 自动创作流水线专用：为“待写章节”生成整章正文。
      * 自动流水线会先建好空章节再调用，因此这里统一按“已有章节、向尾部续写整章”处理。
      */
-    public Flux<String> writeChapter(Long novelId, Long chapterId, int targetWords, User user) {
+    public Flux<String> writeChapter(Long novelId, Long chapterId, User user) {
         Novel novel = novelService.loadOwned(novelId, user);
+        int targetWords = perChapterTargetWords(novel);
         Chapter chapter = loadChapter(novelId, chapterId);
         String prevTail = chapterRepository
                 .findFirstByNovelIdAndDeletedFalseAndChapterOrderLessThanOrderByChapterOrderDescIdDesc(
@@ -138,12 +144,38 @@ public class AiService {
         } else {
             prompt.append("\n【本章已写内容结尾】\n").append(currentTail);
         }
+        // 注入本章大纲（若存在）：让 AI 严格按规划施工，避免跑偏、收尾失控
+        chapterOutlineRepository.findByChapterId(chapter.getId()).ifPresent(o -> {
+            if (o.getOutline() != null && !o.getOutline().isBlank()) {
+                prompt.append("\n【本章大纲（请严格据此展开，确保要点全部覆盖、收尾呼应大纲）】\n")
+                        .append(o.getOutline()).append("\n");
+            }
+        });
         prompt.append("""
 
                 【任务】
                 请为本章写出完整正文，目标字数约 %d 字：情节推进扎实、有场景描写与对话、结尾留钩子；直接输出正文，不要输出标题与解释。
                 """.formatted(targetWords));
         return llm(user).stream(AiTaskType.WRITE_CHAPTER, contextOf(novel, chapter.getContent()), SYSTEM_PROMPT, prompt.toString());
+    }
+
+    /**
+     * 按大纲生成整章正文并落库（覆盖式，但 ChapterService.save 会先为旧内容留版本快照，可回滚）。
+     * 流式输出正文的同时在 onComplete 时整章覆盖写入：用于“章节大纲→正文”的一键生成。
+     * 前端先用 Popconfirm 提示覆盖风险，再调用本接口。
+     */
+    public Flux<String> writeChapterAndSave(Long novelId, Long chapterId, User user) {
+        Chapter chapter = loadChapter(novelId, chapterId);
+        String title = chapter.getTitle();
+        StringBuilder acc = new StringBuilder();
+        return writeChapter(novelId, chapterId, user)
+                .doOnNext(acc::append)
+                .doOnComplete(() -> {
+                    String content = acc.toString().trim();
+                    if (!content.isEmpty()) {
+                        chapterService.save(chapter.getId(), user, new SaveReq(title, content, "ai"));
+                    }
+                });
     }
 
     public Flux<String> expand(Long novelId, String text, User user) {
@@ -176,32 +208,59 @@ public class AiService {
     }
 
     /**
-     * 生成章节摘要并落库（每章一条，覆盖更新）。
+     * 生成章节大纲并落库（每章一条，覆盖更新）。
+     * 用于“创作前规划”：明确本章的场景节拍、关键进展、人物弧光与收尾钩子，指导后续正文创作。
      * 流式完成后持久化；中途取消/失败不落库。
      */
-    public Flux<String> summarize(Long novelId, Long chapterId, User user) {
+    public Flux<String> generateChapterOutline(Long novelId, Long chapterId, User user) {
         Novel novel = novelService.loadOwned(novelId, user);
         Chapter chapter = loadChapter(novelId, chapterId);
-        String prompt = contextBuilder.buildNovelInfo(novel)
-                + "\n【本章正文】第" + chapter.getChapterOrder() + "章《" + chapter.getTitle() + "》\n"
-                + tail(chapter.getContent(), 4000) + """
+        StringBuilder prompt = new StringBuilder(contextBuilder.buildNovelInfo(novel))
+                .append("\n【当前章节】第").append(chapter.getChapterOrder())
+                .append("章《").append(chapter.getTitle()).append("》\n");
+        String content = chapter.getContent();
+        if (content != null && !content.isBlank()) {
+            prompt.append("（本章已有部分草稿，可据此提炼更贴合的规划；若尚未动笔则自由规划）\n");
+            prompt.append("【本章已有内容】\n").append(tail(content, 2000)).append("\n");
+        }
+        prompt.append("""
 
                 【任务】
-                请为本章生成 150-200 字的中文摘要：概括关键事件、人物状态变化与新增伏笔。只输出摘要正文，不要输出标题、序号或解释。
-                """;
+                请为这一章撰写“写作大纲”（规划，而非正文）：
+                1. 用 3-6 个要点列出本章的场景节拍与关键情节推进；
+                2. 点明本章要完成的人物状态变化或关系进展；
+                3. 标出本章结尾的钩子（为下一章留悬念或动力）；
+                4. 确保与全书大纲的方向一致，避免偏离主线、尾大不掉。
+                只输出大纲要点，不要写正文，不要输出标题、序号以外的解释。
+                """);
         StringBuilder acc = new StringBuilder();
-        return llm(user).stream(AiTaskType.SUMMARIZE, contextOf(novel, chapter.getContent()), SYSTEM_PROMPT, prompt)
+        return llm(user).stream(AiTaskType.CHAPTER_OUTLINE, contextOf(novel, content), SYSTEM_PROMPT, prompt.toString())
                 .doOnNext(acc::append)
-                .doOnComplete(() -> saveSummary(novel.getId(), chapter.getId(), acc.toString().trim()));
+                .doOnComplete(() -> saveOutline(novel.getId(), chapter.getId(), acc.toString().trim()));
     }
 
-    /** 按优先级打包的静态上下文：作品信息 + 一致性卡片 + 大纲 + 故事脑 + 近期摘要 */
+    /** 按优先级打包的静态上下文：作品信息 + 一致性卡片 + 大纲 + 故事脑 + 已规划章节大纲 */
     private String baseContext(Novel novel) {
         List<NovelCharacter> characters = characterRepository.findByNovelIdOrderByCreatedAtAscIdAsc(novel.getId());
         List<WorldSetting> worlds = worldSettingRepository.findByNovelIdOrderByCreatedAtAscIdAsc(novel.getId());
         StoryMemory memory = storyMemoryRepository.findByNovelId(novel.getId()).orElse(null);
-        List<ChapterSummary> summaries = chapterSummaryRepository.findByNovelIdOrdered(novel.getId());
-        return contextBuilder.buildBase(novel, characters, worlds, memory, summaries);
+        List<ChapterOutline> outlines = chapterOutlineRepository.findByNovelIdOrdered(novel.getId());
+        return contextBuilder.buildBase(novel, characters, worlds, memory, outlines);
+    }
+
+    /**
+     * 每章目标字数：优先按“总目标字数 / 章节数”动态均摊；作品未设置总目标时退回兜底值。
+     * 这是创作时的唯一字数依据——前端不传、也不让用户手动选择字数。
+     */
+    private static final int FALLBACK_CHAPTER_WORDS = 1500;
+
+    private int perChapterTargetWords(Novel novel) {
+        Integer total = novel.getTargetWords();
+        long count = chapterRepository.countByNovelIdAndDeletedFalse(novel.getId());
+        if (total != null && total > 0 && count > 0) {
+            return (int) Math.ceil((double) total / count);
+        }
+        return FALLBACK_CHAPTER_WORDS;
     }
 
     private Chapter loadChapter(Long novelId, Long chapterId) {
@@ -210,18 +269,18 @@ public class AiService {
                 .orElseThrow(() -> new BizException(404, "章节不存在", 404));
     }
 
-    private void saveSummary(Long novelId, Long chapterId, String summary) {
-        if (summary == null || summary.isBlank()) {
+    private void saveOutline(Long novelId, Long chapterId, String outline) {
+        if (outline == null || outline.isBlank()) {
             return;
         }
-        ChapterSummary s = chapterSummaryRepository.findByChapterId(chapterId).orElseGet(() -> {
-            ChapterSummary cs = new ChapterSummary();
-            cs.setNovelId(novelId);
-            cs.setChapterId(chapterId);
-            return cs;
+        ChapterOutline o = chapterOutlineRepository.findByChapterId(chapterId).orElseGet(() -> {
+            ChapterOutline co = new ChapterOutline();
+            co.setNovelId(novelId);
+            co.setChapterId(chapterId);
+            return co;
         });
-        s.setSummary(summary);
-        chapterSummaryRepository.save(s);
+        o.setOutline(outline);
+        chapterOutlineRepository.save(o);
     }
 
     private AiContext contextOf(Novel novel, String sourceText) {

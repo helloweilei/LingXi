@@ -30,7 +30,7 @@ const STATUS_TAG: Record<string, { color: string; text: string }> = {
 };
 
 /**
- * 自动创作面板：收集创作意图（模式/章节数/每章字数/大纲/摘要）并发起任务；
+ * 自动创作面板：收集创作意图（模式/章节数/每章字数/全书大纲/章节大纲）并发起任务；
  * 轮询展示任务进度；CONFIRM 模式下支持逐章批准继续。
  * 任务进度变化时通过 onProgress 通知父页面刷新（如顶部字数统计）。
  * 默认章节数 6；默认每章字数 = 总字数 / 6（总字数未设置时兜底 1200，区间 300-5000）。
@@ -93,7 +93,7 @@ export default function AutoWritePanel({
         chapters: values.chapters,
         wordsPerChapter: values.wordsPerChapter,
         genOutline: values.genOutline,
-        autoSummary: values.autoSummary,
+        autoOutline: values.autoOutline,
       });
       message.success('自动创作任务已启动');
       load();
@@ -123,7 +123,7 @@ export default function AutoWritePanel({
         chapters: t.chapters,
         wordsPerChapter: t.wordsPerChapter,
         genOutline: t.genOutline,
-        autoSummary: t.autoSummary,
+        autoOutline: t.autoOutline,
         startChapter: (t.currentChapter ?? 0) + 1,
       });
       message.success('已从第 ' + ((t.currentChapter ?? 0) + 1) + ' 章继续生成');
@@ -160,14 +160,14 @@ export default function AutoWritePanel({
       <div style={{ marginBottom: 14 }}>
         <b>AI 自动创作</b>
         <span className="muted" style={{ marginLeft: 10 }}>
-          一键流水线：大纲 → 逐章生成 → 摘要落库
+          一键流水线：全书大纲 → 章节大纲 → 逐章正文
         </span>
       </div>
       <Card size="small" style={{ marginBottom: 16, background: '#fafaff' }}>
         <Form
           form={form}
           layout="inline"
-          initialValues={{ mode: 'AUTO', chapters: 6, wordsPerChapter: defaultWordsPerChapter, genOutline: true, autoSummary: true }}
+          initialValues={{ mode: 'AUTO', chapters: 6, wordsPerChapter: defaultWordsPerChapter, genOutline: true, autoOutline: true }}
           style={{ rowGap: 12 }}
         >
           <Form.Item name="mode" label="模式">
@@ -188,7 +188,7 @@ export default function AutoWritePanel({
           <Form.Item name="genOutline" label="先生成大纲" valuePropName="checked">
             <Switch />
           </Form.Item>
-          <Form.Item name="autoSummary" label="生成章节摘要" valuePropName="checked">
+          <Form.Item name="autoOutline" label="生成章节大纲（写作前规划）" valuePropName="checked">
             <Switch />
           </Form.Item>
           <Form.Item>
@@ -308,7 +308,7 @@ export default function AutoWritePanel({
                 {!['QUEUED', 'RUNNING', 'WAITING_APPROVAL'].includes(r.status) && (
                   <Popconfirm
                     title="删除任务并移除生成的内容？"
-                    description="将删除该任务创建的章节与摘要；若任务生成过全书大纲，大纲也会被清空。章节正文与历史版本会保留（软删除），后续可恢复。"
+                    description="将删除该任务创建的章节与大纲；若任务生成过全书大纲，大纲也会被清空。章节正文与历史版本会保留（软删除），后续可恢复。"
                     okText="删除"
                     okButtonProps={{ danger: true }}
                     onConfirm={() => remove(r.id)}

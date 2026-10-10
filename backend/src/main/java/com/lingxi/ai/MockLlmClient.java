@@ -26,7 +26,7 @@ public class MockLlmClient implements LlmClient {
             case POLISH -> polish(ctx);
             case EXPAND -> expand(ctx);
             case CHAT -> chat(ctx);
-            case SUMMARIZE -> summarize(ctx);
+            case CHAPTER_OUTLINE -> chapterOutline(ctx);
             case GUIDE_PROPOSAL -> guideProposals(ctx);
         };
         List<String> chunks = new ArrayList<>();
@@ -193,15 +193,20 @@ public class MockLlmClient implements LlmClient {
                 """, q);
     }
 
-    private String summarize(AiContext ctx) {
-        String src = blank(ctx.sourceText()) ? "本章尚无正文。" : ctx.sourceText().trim().replace("\n", " ");
-        String head = src.length() > 160 ? src.substring(0, 160) + "……" : src;
+    private String chapterOutline(AiContext ctx) {
+        String title = blank(ctx.novelTitle()) ? "未命名新书" : ctx.novelTitle();
+        String lead = (ctx.characterNames() == null || ctx.characterNames().isEmpty())
+                ? "主角" : ctx.characterNames().get(0);
         return String.format("""
-                【本章摘要（示例）】
-                %1$s
+                【本章大纲（示例）· 《%1$s》】
+                1. 开篇钩子：以%3$s的一个细微异常切入，制造悬念，把读者拉进本章情境。
+                2. 场景推进：在熟悉的场景里插入一次意外遭遇，迫使%3$s做出选择。
+                3. 人物弧光：通过一次对话或内心独白，揭示%3$s隐藏的动机或软肋。
+                4. 冲突升级：敌对势力/环境压力加码，把本章矛盾推到临界点。
+                5. 收尾钩子：以一封信、一个消失的身影或一个未接的承诺收束，为下一章留悬念。
 
-                （Mock 引擎仅生成占位摘要；接入真实模型后，将基于正文自动产出 150-200 字的准确摘要。）
-                """, head);
+                （Mock 引擎仅生成占位大纲；接入真实模型后，将依据全书大纲与角色设定产出贴合的章节规划。）
+                """, title, "", lead);
     }
 
     private String guideProposals(AiContext ctx) {

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Button, Card, Col, Empty, Modal, Popconfirm, Row, Statistic, Tag, message } from 'antd';
-import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
+import { Button, Card, Col, Empty, Modal, Popconfirm, Row, Space, Statistic, Tag, message } from 'antd';
+import { BulbOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
 import { novelApi } from '../api';
@@ -51,9 +51,14 @@ export default function Dashboard() {
     <div className="page-container">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <h2 style={{ margin: 0 }}>我的作品台</h2>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
-          新建作品
-        </Button>
+        <Space>
+          <Button icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
+            新建作品
+          </Button>
+          <Button type="primary" icon={<BulbOutlined />} onClick={() => navigate('/guide')}>
+            灵感启发
+          </Button>
+        </Space>
       </div>
 
       <Row gutter={16} style={{ marginBottom: 24 }}>
@@ -80,9 +85,14 @@ export default function Dashboard() {
             description={<span className="muted">还没有作品，从第一本书开始吧</span>}
             style={{ padding: '40px 0' }}
           >
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
-              创作第一本书
-            </Button>
+            <Space direction="vertical">
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
+                创作第一本书
+              </Button>
+              <Button icon={<BulbOutlined />} onClick={() => navigate('/guide')}>
+                用灵感启发开始
+              </Button>
+            </Space>
           </Empty>
         </Card>
       ) : (

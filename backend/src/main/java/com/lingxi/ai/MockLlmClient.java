@@ -27,6 +27,7 @@ public class MockLlmClient implements LlmClient {
             case EXPAND -> expand(ctx);
             case CHAT -> chat(ctx);
             case SUMMARIZE -> summarize(ctx);
+            case GUIDE_PROPOSAL -> guideProposals(ctx);
         };
         List<String> chunks = new ArrayList<>();
         int i = 0;
@@ -201,6 +202,44 @@ public class MockLlmClient implements LlmClient {
 
                 （Mock 引擎仅生成占位摘要；接入真实模型后，将基于正文自动产出 150-200 字的准确摘要。）
                 """, head);
+    }
+
+    private String guideProposals(AiContext ctx) {
+        String info = blank(ctx.sourceText()) ? "一个全新的故事想法" : ctx.sourceText();
+        return """
+                [
+                  {
+                    "title": "《余烬纪元》",
+                    "premise": "（示例引擎）基于「%1$s」延展：末世灾变后文明在灰烬中重建，少年背负失落的传承，于废土上寻找真相。",
+                    "world": "灾变后的分层世界：地表废土、地下避难所、悬浮天城三方势力犬牙交错。",
+                    "protagonist": "沉默坚毅的拾荒少年，体内封印着旧时代的禁忌之力。",
+                    "outline": "第一卷·拾荒者：从废墟中捡回一件改变命运的遗物。\\n第二卷·裂隙：三方势力围绕遗物展开追逐。\\n第三卷·余烬：揭开灾变真相，少年站上抉择之巅。",
+                    "characters": [ {"name":"阿烬","role":"主角","description":"拾荒少年，坚韧善良，逐渐觉醒力量"}, {"name":"苏璃","role":"女主","description":"天城派来的观察者，立场微妙"} ],
+                    "worlds": [ {"title":"废土地表","content":"辐射与遗迹并存的危险地带"}, {"title":"悬浮天城","content":"掌控旧时代科技的精英统治层"} ],
+                    "platform": "起点 / 番茄"
+                  },
+                  {
+                    "title": "《长安诡事录》",
+                    "premise": "（示例引擎）基于「%1$s」延展：大唐长安诡秘案件接连发生，落魄贵族子弟以智破局，在权谋与玄奇间周旋。",
+                    "world": "架空的盛唐气象，市井百态与朝堂暗涌交织，志怪元素若隐若现。",
+                    "protagonist": "机敏毒舌的没落宗室，被迫卷入连环奇案。",
+                    "outline": "第一卷·初案：一桩离奇命案牵出旧案。\\n第二卷·迷局：权贵联手设套。\\n第三卷·翻案：真相大白，主角逆风翻盘。",
+                    "characters": [ {"name":"李妄","role":"主角","description":"没落宗室，智计百出"}, {"name":"裴缨","role":"搭档","description":"女捕快，武力担当"} ],
+                    "worlds": [ {"title":"长安城","content":"繁华与暗影并存的都城"}, {"title":"玄机阁","content":"掌管志怪档案的隐秘机构"} ],
+                    "platform": "晋江 / 自有书城"
+                  },
+                  {
+                    "title": "《星轨设计师》",
+                    "premise": "（示例引擎）基于「%1$s」延展：近未来普通人也能定制自己的星际航线，一名航线规划师在秩序与自由之间，写下浪漫而硬核的太空史诗。",
+                    "world": "人类散落星海，航线即命运；星际公会、自由商人、AI 守门人三足鼎立。",
+                    "protagonist": "孤独而浪漫的航线设计师，相信每一段旅程都该有温度。",
+                    "outline": "第一卷·起航：接下一单不可能完成的航线。\\n第二卷·风暴：穿越 forbidden 星域。\\n第三卷·归处：在星海尽头找到属于自己的港。",
+                    "characters": [ {"name":"言星","role":"主角","description":"航线设计师，温柔执着"}, {"name":"零","role":"AI","description":"随行智能体，逐渐拥有自我"} ],
+                    "worlds": [ {"title":"星际公会","content":"垄断航线的权威组织"}, {"title":"自由星港","content":"商人与流浪者的集散地"} ],
+                    "platform": "多平台同步"
+                  }
+                ]
+                """.formatted(info.replace("%", "%%"));
     }
 
     private static boolean blank(String s) {

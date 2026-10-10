@@ -1,0 +1,341 @@
+package com.lingxi.guide;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.lingxi.ai.AiContext;
+import com.lingxi.ai.AiTaskType;
+import com.lingxi.ai.LlmClientProvider;
+import com.lingxi.character.CharacterService;
+import com.lingxi.character.dto.CharacterDtos;
+import com.lingxi.common.BizException;
+import com.lingxi.guide.dto.GuideDtos;
+import com.lingxi.novel.NovelService;
+import com.lingxi.novel.dto.NovelDtos;
+import com.lingxi.user.User;
+import com.lingxi.world.WorldSettingService;
+import com.lingxi.world.dto.WorldDtos;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+
+/**
+ * 启发式创作引导：把「零想法 / 一句话种子」通过问答或扩展，转化为多套原创小说方案，
+ * 并支持选用方案一键生成带大纲 / 角色 / 世界观的作品。
+ */
+@Service
+public class IdeaGuideService {
+
+    private static final String SYSTEM_PROMPT = """
+            你是「灵犀创作」平台内置的资深中文网文策划与创作助手。你的任务是根据用户提供的创作种子
+            （题材 / 基调 / 读者 / 冲突 / 篇幅 / 平台，或一段模糊想法），策划出多个可落地的原创小说方案。
+            请严格遵守：
+            1. 使用简体中文；方案必须原创、具体、相互之间有差异化；
+            2. 只输出符合要求的 JSON 数组，不要输出任何解释、前言、结语或 Markdown 代码块标记；
+            3. 每个方案都要给出可操作的世界观与主要人物，便于后续直接进入写作。
+            """;
+
+    private static final List<GuideDtos.Question> SCRIPT = List.of(
+            new GuideDtos.Question("genre", "题材", "你更想写哪类题材？（也可自行填写）",
+                    List.of("玄幻", "都市", "悬疑", "言情", "科幻", "历史", "奇幻", "游戏竞技", "轻小说")),
+            new GuideDtos.Question("tone", "基调", "希望整体是什么基调？（也可自行填写）",
+                    List.of("热血", "轻松", "暗黑", "治愈", "烧脑", "搞笑", "甜宠", "群像")),
+            new GuideDtos.Question("audience", "目标读者", "主要写给谁看？（也可自行填写）",
+                    List.of("男频热血粉", "女频甜宠党", "泛科幻读者", "全年龄", "悬疑推理迷", "二次元")),
+            new GuideDtos.Question("conflict", "核心冲突", "最能驱动故事的核心冲突是什么？（也可自行填写）",
+                    List.of("复仇", "成长", "解密", "救赎", "逆袭", "守护", "权谋", "生存")),
+            new GuideDtos.Question("length", "篇幅期望", "预计篇幅多大？（也可自行填写）",
+                    List.of("短篇10万字内", "中篇30-50万", "长篇百万+", "连载不限")),
+            new GuideDtos.Question("platform", "目标平台", "打算发到哪些平台？（这也影响节奏与爽点设计，也可自行填写）",
+                    List.of("起点", "番茄", "晋江", "自有书城", "多平台同步", "微信读书")));
+
+    private static final Map<String, String> FIELD_LABEL = Map.of(
+            "genre", "题材", "tone", "基调", "audience", "目标读者",
+            "conflict", "核心冲突", "length", "篇幅期望", "platform", "目标平台");
+
+    private final CreativeIntentRepository repository;
+    private final LlmClientProvider llmClientProvider;
+    private final NovelService novelService;
+    private final CharacterService characterService;
+    private final WorldSettingService worldSettingService;
+    private final ObjectMapper objectMapper;
+
+    public IdeaGuideService(CreativeIntentRepository repository, LlmClientProvider llmClientProvider,
+                            NovelService novelService, CharacterService characterService,
+                            WorldSettingService worldSettingService, ObjectMapper objectMapper) {
+        this.repository = repository;
+        this.llmClientProvider = llmClientProvider;
+        this.novelService = novelService;
+        this.characterService = characterService;
+        this.worldSettingService = worldSettingService;
+        this.objectMapper = objectMapper;
+    }
+
+    public GuideDtos.GuideStartVO start(User user, String seed) {
+        CreativeIntent intent = new CreativeIntent();
+        intent.setUserId(user.getId());
+        intent.setStatus("COLLECTING");
+        boolean hasSeed = seed != null && !seed.isBlank();
+        if (hasSeed) {
+            Map<String, String> m = new LinkedHashMap<>();
+            m.put("seed", seed.trim());
+            intent.setSeedJson(writeJson(m));
+        } else {
+            intent.setSeedJson("{}");
+        }
+        repository.save(intent);
+        GuideDtos.Question first = hasSeed ? null : SCRIPT.get(0);
+        return new GuideDtos.GuideStartVO(intent.getId(), hasSeed ? "seed" : "guided", first);
+    }
+
+    public GuideDtos.AnswerVO answer(User user, Long id, String answer) {
+        CreativeIntent intent = loadOwned(id, user);
+        Map<String, String> answers = readAnswers(intent.getSeedJson());
+        if (answers.containsKey("seed")) {
+            return new GuideDtos.AnswerVO(null, true, SCRIPT.size(), SCRIPT.size());
+        }
+        int step = answers.size();
+        if (step >= SCRIPT.size()) {
+            return new GuideDtos.AnswerVO(null, true, step, SCRIPT.size());
+        }
+        GuideDtos.Question q = SCRIPT.get(step);
+        answers.put(q.field(), answer == null ? "" : answer.trim());
+        intent.setSeedJson(writeJson(answers));
+        repository.save(intent);
+        int next = answers.size();
+        if (next >= SCRIPT.size()) {
+            return new GuideDtos.AnswerVO(null, true, next, SCRIPT.size());
+        }
+        return new GuideDtos.AnswerVO(SCRIPT.get(next), false, next, SCRIPT.size());
+    }
+
+    public GuideDtos.GuideStateVO getState(User user, Long id) {
+        CreativeIntent intent = loadOwned(id, user);
+        Map<String, String> answers = readAnswers(intent.getSeedJson());
+        List<GuideDtos.ProposalVO> proposals = parseProposals(intent.getProposalJson());
+        return new GuideDtos.GuideStateVO(intent.getStatus(), answers.get("seed"), answers, proposals, intent.getSelectedId());
+    }
+
+    /**
+     * 生成创意提案（流式）。流式文本在 onComplete 时解析为 JSON 数组并落到 creative_intents.proposal_json。
+     */
+    public reactor.core.publisher.Flux<String> generate(User user, Long id) {
+        CreativeIntent intent = loadOwned(id, user);
+        Map<String, String> answers = readAnswers(intent.getSeedJson());
+        String prompt;
+        String ctxSource;
+        String genre = "";
+        if (answers.containsKey("seed")) {
+            prompt = buildSeedPrompt(answers.get("seed"));
+            ctxSource = "种子：" + answers.get("seed");
+        } else {
+            prompt = buildGuidedPrompt(answers);
+            genre = answers.getOrDefault("genre", "");
+            ctxSource = "引导答案：" + answers;
+        }
+        com.lingxi.ai.LlmClient client = llmClientProvider.forUser(user);
+        AiContext ctx = new AiContext("灵犀创作引导", genre, new ArrayList<>(), ctxSource);
+        StringBuilder acc = new StringBuilder();
+        return client.stream(AiTaskType.GUIDE_PROPOSAL, ctx, SYSTEM_PROMPT, prompt)
+                .doOnNext(acc::append)
+                .doOnComplete(() -> saveProposals(intent, acc.toString().trim()));
+    }
+
+    @Transactional
+    public GuideDtos.SelectResult select(User user, Long id, int index) {
+        CreativeIntent intent = loadOwned(id, user);
+        List<JsonNode> proposals = parseProposalNodes(intent.getProposalJson());
+        if (index < 0 || index >= proposals.size()) {
+            throw new BizException(400, "无效的方案序号", 400);
+        }
+        JsonNode p = proposals.get(index);
+        String title = str(p, "title", "未命名新书");
+        String premise = str(p, "premise", "");
+        Map<String, String> answers = readAnswers(intent.getSeedJson());
+        int targetWords = deriveTarget(answers.getOrDefault("length", ""));
+        NovelDtos.CreateReq createReq = new NovelDtos.CreateReq(
+                title, limit(premise, 1000), limit(answers.getOrDefault("genre", ""), 30), targetWords, null, null);
+        NovelDtos.VO novel = novelService.create(user, createReq);
+        Long novelId = novel.id();
+
+        String outline = str(p, "outline", "");
+        if (!outline.isBlank()) {
+            novelService.update(novelId, user, new NovelDtos.UpdateReq(
+                    null, null, null, null, null, null, null, limit(outline, 30000), null));
+        }
+
+        JsonNode chars = p.get("characters");
+        if (chars != null && chars.isArray()) {
+            for (JsonNode c : chars) {
+                characterService.create(novelId, user, new CharacterDtos.SaveReq(
+                        str(c, "name", "角色"), str(c, "role", "配角"), str(c, "description", null)));
+            }
+        }
+        JsonNode worlds = p.get("worlds");
+        if (worlds != null && worlds.isArray()) {
+            for (JsonNode w : worlds) {
+                worldSettingService.create(novelId, user, new WorldDtos.SaveReq(
+                        str(w, "title", "世界观"), str(w, "content", null)));
+            }
+        }
+
+        intent.setStatus("READY");
+        intent.setSelectedId(index);
+        repository.save(intent);
+        return new GuideDtos.SelectResult(novelId);
+    }
+
+    @Transactional
+    public void reset(User user, Long id) {
+        CreativeIntent intent = loadOwned(id, user);
+        intent.setSeedJson("{}");
+        intent.setProposalJson(null);
+        intent.setSelectedId(null);
+        intent.setStatus("COLLECTING");
+        repository.save(intent);
+    }
+
+    private CreativeIntent loadOwned(Long id, User user) {
+        return repository.findByIdAndUserId(id, user.getId())
+                .orElseThrow(() -> new BizException(404, "引导会话不存在", 404));
+    }
+
+    private Map<String, String> readAnswers(String json) {
+        Map<String, String> m = new LinkedHashMap<>();
+        if (json == null || json.isBlank()) {
+            return m;
+        }
+        try {
+            JsonNode node = objectMapper.readTree(json);
+            if (node.isObject()) {
+                node.fields().forEachRemaining(e -> m.put(e.getKey(), e.getValue().asText("")));
+            }
+        } catch (Exception ignored) {
+            // 解析失败时返回空，引导可重新开始
+        }
+        return m;
+    }
+
+    private String writeJson(Map<String, String> m) {
+        try {
+            return objectMapper.writeValueAsString(m);
+        } catch (Exception e) {
+            return "{}";
+        }
+    }
+
+    private List<GuideDtos.ProposalVO> parseProposals(String json) {
+        return parseProposalNodes(json).stream().map(this::toProposalVO).toList();
+    }
+
+    private List<JsonNode> parseProposalNodes(String json) {
+        List<JsonNode> list = new ArrayList<>();
+        if (json == null || json.isBlank()) {
+            return list;
+        }
+        String cleaned = extractJsonArray(json);
+        try {
+            JsonNode node = objectMapper.readTree(cleaned);
+            if (node.isArray()) {
+                node.forEach(list::add);
+            }
+        } catch (Exception ignored) {
+            // 解析失败：保留空，前端可重新生成
+        }
+        return list;
+    }
+
+    private String extractJsonArray(String s) {
+        int a = s.indexOf('[');
+        int b = s.lastIndexOf(']');
+        if (a >= 0 && b > a) {
+            return s.substring(a, b + 1);
+        }
+        return s;
+    }
+
+    private GuideDtos.ProposalVO toProposalVO(JsonNode p) {
+        List<GuideDtos.PropCharacter> chars = new ArrayList<>();
+        JsonNode cNode = p.get("characters");
+        if (cNode != null && cNode.isArray()) {
+            cNode.forEach(c -> chars.add(new GuideDtos.PropCharacter(
+                    str(c, "name", ""), str(c, "role", ""), str(c, "description", ""))));
+        }
+        List<GuideDtos.PropWorld> worlds = new ArrayList<>();
+        JsonNode wNode = p.get("worlds");
+        if (wNode != null && wNode.isArray()) {
+            wNode.forEach(w -> worlds.add(new GuideDtos.PropWorld(str(w, "title", ""), str(w, "content", ""))));
+        }
+        return new GuideDtos.ProposalVO(
+                str(p, "title", ""), str(p, "premise", ""), str(p, "world", ""),
+                str(p, "protagonist", ""), str(p, "outline", ""), chars, worlds, str(p, "platform", ""));
+    }
+
+    private static String str(JsonNode n, String k, String def) {
+        JsonNode v = n.get(k);
+        return v == null ? def : v.asText(def);
+    }
+
+    private static String limit(String s, int max) {
+        if (s == null) {
+            return "";
+        }
+        return s.length() <= max ? s : s.substring(0, max);
+    }
+
+    private static int deriveTarget(String length) {
+        if (length == null) {
+            return 300000;
+        }
+        if (length.contains("短")) {
+            return 100000;
+        }
+        if (length.contains("中")) {
+            return 300000;
+        }
+        if (length.contains("长")) {
+            return 1000000;
+        }
+        return 300000;
+    }
+
+    private void saveProposals(CreativeIntent intent, String raw) {
+        if (raw == null || raw.isBlank()) {
+            return;
+        }
+        intent.setProposalJson(raw);
+        intent.setStatus("PROPOSING");
+        repository.save(intent);
+    }
+
+    private String buildGuidedPrompt(Map<String, String> answers) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("以下是用户填写的创作偏好，请基于它们策划 3 套差异化、可落地的原创小说方案：\n");
+        answers.forEach((k, v) -> sb.append("- ").append(FIELD_LABEL.getOrDefault(k, k)).append("：").append(v).append("\n"));
+        sb.append("""
+                
+                【要求】
+                1. 输出一个 JSON 数组，包含 3 个对象；
+                2. 每个对象字段：title（书名）、premise（一句话梗概/卖点）、world（世界观要点）、protagonist（主角设定）、outline（分卷大纲草案，用 \\n 换行）、characters（数组，每项 {name,role,description}）、worlds（数组，每项 {title,content}）、platform（目标平台，来自用户输入）；
+                3. 三套方案在题材切入点、人设、爽点上要有明显差异；
+                4. 只输出 JSON，不要任何额外文字或代码块标记。
+                """);
+        return sb.toString();
+    }
+
+    private String buildSeedPrompt(String seed) {
+        return """
+                用户目前只有一个模糊的想法：「%1$s」。
+
+                请基于这个模糊想法，扩展并策划 3 套差异化、可落地的原创小说方案：
+                1. 输出一个 JSON 数组，包含 3 个对象；
+                2. 每个对象字段：title（书名）、premise（一句话梗概/卖点）、world（世界观要点）、protagonist（主角设定）、outline（分卷大纲草案，用 \\n 换行）、characters（数组，每项 {name,role,description}）、worlds（数组，每项 {title,content}）、platform（推断合适的发布平台）；
+                3. 三套方案可以围绕同一个核心种子做不同方向的发散（如不同题材、不同基调、不同受众）；
+                4. 只输出 JSON，不要任何额外文字或代码块标记。
+                """.formatted(seed.replace("%", "%%"));
+    }
+}

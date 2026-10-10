@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard';
 import NovelDetail from './pages/NovelDetail';
 import Editor from './pages/Editor';
 import Reader from './pages/Reader';
+import Guide from './pages/Guide';
 import type { ReactNode } from 'react';
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -27,6 +28,7 @@ export default function App() {
       >
         <Route index element={<Dashboard />} />
         <Route path="novel/:id" element={<NovelDetail />} />
+        <Route path="guide" element={<Guide />} />
       </Route>
       <Route
         path="/write/:chapterId"

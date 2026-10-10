@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Outlet, useNavigate } from 'react-router-dom';
-import { Avatar, Dropdown, Tag, Tooltip, message } from 'antd';
+import { Avatar, Button, Dropdown, Tag, Tooltip, message } from 'antd';
 import { EditOutlined, LogoutOutlined, SettingOutlined, UserOutlined } from '@ant-design/icons';
 import { useAuth } from '../store/auth';
 import { authApi, aiApi } from '../api';

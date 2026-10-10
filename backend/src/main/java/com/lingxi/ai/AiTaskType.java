@@ -7,5 +7,6 @@ public enum AiTaskType {
     POLISH,
     EXPAND,
     CHAT,
-    SUMMARIZE
+    SUMMARIZE,
+    GUIDE_PROPOSAL
 }

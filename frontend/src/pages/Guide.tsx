@@ -1,6 +1,18 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Button, Card, Col, Input, Progress, Row, Tag, Typography, message } from 'antd';
+import { useCallback, useEffect, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import {
+  Alert,
+  Button,
+  Card,
+  Col,
+  Input,
+  Progress,
+  Row,
+  Space,
+  Tag,
+  Typography,
+  message,
+} from 'antd';
 import { guideApi } from '../api/guide';
 import type { Question, Proposal, GuideState } from '../api/guide';
 import GuideChat from '../components/GuideChat';
@@ -17,6 +29,8 @@ function parseTokens(s: string): string[] {
 
 export default function Guide() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const resumeId = Number(searchParams.get('intentId')) || null;
   const [intentId, setIntentId] = useState<number | null>(null);
   const [mode, setMode] = useState<'guided' | 'seed' | null>(null);
   const [question, setQuestion] = useState<Question | null>(null);
@@ -97,11 +111,58 @@ export default function Guide() {
     try {
       const s: GuideState = await guideApi.get(intentId);
       setProposals(s.proposals ?? []);
-      setStep(s.answers ? Object.keys(s.answers).filter((k) => k !== 'seed').length : 0);
+      setStep(s.step ?? 0);
+      setTotal(s.total ?? 7);
     } catch (e: any) {
       message.error(e?.message ?? '获取方案失败');
     }
   };
+
+  /** 从历史列表进入：恢复这次未完成的引导（进度、已答、下一题、已生成的方案） */
+  const resumeIntent = useCallback(
+    async (id: number) => {
+      setBusy(true);
+      try {
+        const s: GuideState = await guideApi.get(id);
+        setIntentId(id);
+        setStep(s.step ?? 0);
+        setTotal(s.total ?? 7);
+        setProposals(s.proposals ?? []);
+        setSeedText(s.seed ?? '');
+        if (s.proposals?.length) {
+          // 方案已生成，直接展示方案列表
+          setQuestion(null);
+          setMode(s.seed ? 'seed' : 'guided');
+          setGenerating(false);
+          message.info('已加载该次引导的方案');
+        } else if (s.nextQuestion) {
+          setMode('guided');
+          setQuestion(s.nextQuestion);
+          setInput('');
+          message.info(`已继续上次进度（第 ${(s.step ?? 0) + 1} 问）`);
+        } else if (s.seed) {
+          // 种子模式：答案已就绪，可直接生成方案
+          setMode('seed');
+          setQuestion(null);
+        } else {
+          setMode('guided');
+          setQuestion(null);
+        }
+      } catch (e: any) {
+        message.error(e?.message ?? '加载历史引导失败');
+        setSearchParams({}, { replace: true });
+      } finally {
+        setBusy(false);
+      }
+    },
+    [setSearchParams],
+  );
+
+  useEffect(() => {
+    if (resumeId) {
+      void resumeIntent(resumeId);
+    }
+  }, [resumeId, resumeIntent]);
 
   const selectProposal = async (i: number) => {
     if (!intentId) return;
@@ -133,6 +194,8 @@ export default function Guide() {
     setSeedText('');
     setGenerating(false);
     setStep(0);
+    // 清掉 URL 上的 intentId，避免 restart 后又被自动恢复
+    setSearchParams({}, { replace: true });
   };
 
   return (
@@ -140,7 +203,12 @@ export default function Guide() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <h2 style={{ margin: 0 }}>灵感启发 · 从想法到作品</h2>
         {intentId && (
-          <Button onClick={restart}>重新开始</Button>
+          <Space>
+            <Button onClick={() => navigate('/')}>返回作品台</Button>
+            <Button danger onClick={restart}>
+              重新开始（清空本次答案）
+            </Button>
+          </Space>
         )}
       </div>
 
@@ -173,6 +241,14 @@ export default function Guide() {
 
       {intentId && mode === 'guided' && question && !generating && proposals.length === 0 && (
         <Card>
+          {step > 0 && (
+            <Alert
+              type="info"
+              showIcon
+              style={{ marginBottom: 16 }}
+              message={`正在继续上次的引导（已完成 ${step} / ${total} 问）`}
+            />
+          )}
           <Progress percent={Math.round((step / total) * 100)} showInfo={false} />
           <p className="muted">
             第 {step + 1} / {total} 问 · {question.label}

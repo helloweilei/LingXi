@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Button, Card, Col, Empty, Modal, Popconfirm, Row, Space, Statistic, Tag, message } from 'antd';
-import { BulbOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
+import { BulbOutlined, DeleteOutlined, HistoryOutlined, PlusOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
 import { novelApi } from '../api';
 import type { Novel } from '../api/types';
 import NovelFormModal from '../components/NovelFormModal';
+import GuideHistoryModal from '../components/GuideHistoryModal';
 
 const STATUS_COLOR: Record<string, string> = {
   草稿: 'default',
@@ -18,6 +19,7 @@ export default function Dashboard() {
   const [novels, setNovels] = useState<Novel[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -52,6 +54,9 @@ export default function Dashboard() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <h2 style={{ margin: 0 }}>我的作品台</h2>
         <Space>
+          <Button icon={<HistoryOutlined />} onClick={() => setHistoryOpen(true)}>
+            历史方案
+          </Button>
           <Button icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
             新建作品
           </Button>
@@ -176,6 +181,8 @@ export default function Dashboard() {
           setNovels((prev) => [n, ...prev]);
         }}
       />
+
+      <GuideHistoryModal open={historyOpen} onClose={() => setHistoryOpen(false)} />
     </div>
   );
 }

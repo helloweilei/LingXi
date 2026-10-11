@@ -7,11 +7,13 @@ import com.lingxi.user.User;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -24,6 +26,14 @@ public class IdeaGuideController {
 
     public IdeaGuideController(IdeaGuideService guideService) {
         this.guideService = guideService;
+    }
+
+    /** 历史引导会话列表（首页「历史方案」入口；按 id 倒序，limit 默认 20、上限 50） */
+    @GetMapping("/intents")
+    public ApiResponse<java.util.List<GuideDtos.IntentSummaryVO>> history(
+            @AuthenticationPrincipal User user,
+            @RequestParam(required = false) Integer limit) {
+        return ApiResponse.ok(guideService.history(user, limit == null ? 20 : limit));
     }
 
     @PostMapping("/start")
@@ -55,6 +65,13 @@ public class IdeaGuideController {
                                                       @PathVariable Long id,
                                                       @RequestBody GuideDtos.SelectReq req) {
         return ApiResponse.ok(guideService.select(user, id, req.proposalIndex()));
+    }
+
+    /** 删除历史引导会话（仅删除该意图及其方案，不影响已生成的作品） */
+    @DeleteMapping("/{id}")
+    public ApiResponse<Void> delete(@AuthenticationPrincipal User user, @PathVariable Long id) {
+        guideService.delete(user, id);
+        return ApiResponse.ok();
     }
 
     @PostMapping("/{id}/reset")

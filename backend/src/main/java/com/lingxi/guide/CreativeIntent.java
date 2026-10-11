@@ -44,6 +44,10 @@ public class CreativeIntent {
     @Column(name = "selected_id")
     private Integer selectedId;
 
+    /** 采用该方案后生成的作品 id（可为空：尚未采用或作品已被删除） */
+    @Column(name = "novel_id")
+    private Long novelId;
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
@@ -103,6 +107,14 @@ public class CreativeIntent {
 
     public void setSelectedId(Integer selectedId) {
         this.selectedId = selectedId;
+    }
+
+    public Long getNovelId() {
+        return novelId;
+    }
+
+    public void setNovelId(Long novelId) {
+        this.novelId = novelId;
     }
 
     public LocalDateTime getCreatedAt() {

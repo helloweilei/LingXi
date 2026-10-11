@@ -9,11 +9,14 @@ import com.lingxi.character.CharacterService;
 import com.lingxi.character.dto.CharacterDtos;
 import com.lingxi.common.BizException;
 import com.lingxi.guide.dto.GuideDtos;
+import com.lingxi.novel.Novel;
+import com.lingxi.novel.NovelRepository;
 import com.lingxi.novel.NovelService;
 import com.lingxi.novel.dto.NovelDtos;
 import com.lingxi.user.User;
 import com.lingxi.world.WorldSettingService;
 import com.lingxi.world.dto.WorldDtos;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,6 +26,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * 启发式创作引导：把「零想法 / 一句话种子」通过问答或扩展，转化为多套原创小说方案，
@@ -70,16 +74,19 @@ public class IdeaGuideService {
     private final CreativeIntentRepository repository;
     private final LlmClientProvider llmClientProvider;
     private final NovelService novelService;
+    private final NovelRepository novelRepository;
     private final CharacterService characterService;
     private final WorldSettingService worldSettingService;
     private final ObjectMapper objectMapper;
 
     public IdeaGuideService(CreativeIntentRepository repository, LlmClientProvider llmClientProvider,
-                            NovelService novelService, CharacterService characterService,
+                            NovelService novelService, NovelRepository novelRepository,
+                            CharacterService characterService,
                             WorldSettingService worldSettingService, ObjectMapper objectMapper) {
         this.repository = repository;
         this.llmClientProvider = llmClientProvider;
         this.novelService = novelService;
+        this.novelRepository = novelRepository;
         this.characterService = characterService;
         this.worldSettingService = worldSettingService;
         this.objectMapper = objectMapper;
@@ -123,11 +130,53 @@ public class IdeaGuideService {
         return new GuideDtos.AnswerVO(SCRIPT.get(next), false, next, SCRIPT.size());
     }
 
+    /**
+     * 历史引导会话列表（首页「历史方案」入口）。
+     * 返回摘要而非完整提案详情——完整详情由 GET /api/guide/{id} 按需获取。
+     */
+    public List<GuideDtos.IntentSummaryVO> history(User user, int limit) {
+        int size = Math.max(1, Math.min(limit, 50));
+        List<CreativeIntent> intents = repository.findByUserIdOrderByIdDesc(user.getId(), PageRequest.of(0, size));
+
+        // 批量加载关联作品，避免逐条查询（N+1）
+        List<Long> novelIds = intents.stream()
+                .map(CreativeIntent::getNovelId)
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .toList();
+        Map<Long, Novel> novelById = novelIds.isEmpty()
+                ? Map.of()
+                : novelRepository.findAllById(novelIds).stream()
+                        .collect(Collectors.toMap(Novel::getId, n -> n, (a, b) -> a));
+
+        List<GuideDtos.IntentSummaryVO> result = new ArrayList<>();
+        for (CreativeIntent intent : intents) {
+            Map<String, String> answers = readAnswers(intent.getSeedJson());
+            List<GuideDtos.ProposalVO> proposals = parseProposals(intent.getProposalJson());
+            List<String> titles = proposals.stream()
+                    .map(p -> p.title() == null || p.title().isBlank() ? "未命名方案" : p.title())
+                    .toList();
+            Novel novel = intent.getNovelId() == null ? null : novelById.get(intent.getNovelId());
+            result.add(new GuideDtos.IntentSummaryVO(
+                    intent.getId(), intent.getStatus(), answers.get("seed"),
+                    answers, titles, proposals.size(), intent.getSelectedId(),
+                    intent.getNovelId(), novel == null ? null : novel.getTitle(), novel != null,
+                    intent.getCreatedAt(), intent.getUpdatedAt()));
+        }
+        return result;
+    }
+
     public GuideDtos.GuideStateVO getState(User user, Long id) {
         CreativeIntent intent = loadOwned(id, user);
         Map<String, String> answers = readAnswers(intent.getSeedJson());
         List<GuideDtos.ProposalVO> proposals = parseProposals(intent.getProposalJson());
-        return new GuideDtos.GuideStateVO(intent.getStatus(), answers.get("seed"), answers, proposals, intent.getSelectedId());
+        // 种子模式无问答进度；引导模式按已答数定位下一题（供"继续未完成的问答"恢复现场）
+        boolean guided = !answers.containsKey("seed");
+        int total = SCRIPT.size();
+        int step = guided ? Math.min(answers.size(), total) : total;
+        GuideDtos.Question next = guided && step < total ? SCRIPT.get(step) : null;
+        return new GuideDtos.GuideStateVO(intent.getStatus(), answers.get("seed"), answers,
+                proposals, intent.getSelectedId(), step, total, next);
     }
 
     /**
@@ -199,6 +248,7 @@ public class IdeaGuideService {
 
         intent.setStatus("READY");
         intent.setSelectedId(index);
+        intent.setNovelId(novelId);
         repository.save(intent);
         return new GuideDtos.SelectResult(novelId);
     }
@@ -209,8 +259,19 @@ public class IdeaGuideService {
         intent.setSeedJson("{}");
         intent.setProposalJson(null);
         intent.setSelectedId(null);
+        intent.setNovelId(null);
         intent.setStatus("COLLECTING");
         repository.save(intent);
+    }
+
+    /**
+     * 删除历史引导会话（仅删除意图本身：问答答案与创意方案）。
+     * 已由该会话生成的作品是独立实体，不受影响。
+     */
+    @Transactional
+    public void delete(User user, Long id) {
+        CreativeIntent intent = loadOwned(id, user);
+        repository.delete(intent);
     }
 
     private CreativeIntent loadOwned(Long id, User user) {

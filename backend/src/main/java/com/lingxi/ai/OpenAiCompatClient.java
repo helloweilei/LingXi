@@ -15,6 +15,7 @@ import reactor.core.publisher.Flux;
 import reactor.netty.http.client.HttpClient;
 
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -30,17 +31,20 @@ public class OpenAiCompatClient implements LlmClient {
     private final String model;
     private final double temperature;
     private final long readTimeoutSeconds;
+    private final int maxOutputTokens;
 
     public OpenAiCompatClient(AiProperties props, ObjectMapper objectMapper) {
         this(props.getBaseUrl(), props.getApiKey(), props.getModel(), props.getTemperature(),
-                props.getReadTimeoutSeconds(), props.getConnectTimeoutSeconds(), objectMapper);
+                props.getReadTimeoutSeconds(), props.getConnectTimeoutSeconds(),
+                props.getMaxOutputTokens(), objectMapper);
     }
 
     /**
      * 显式参数构造：供用户级配置按需实例化（每个用户可持有独立的 baseUrl/apiKey/model）。
      */
     public OpenAiCompatClient(String baseUrl, String apiKey, String model, double temperature,
-                              int readTimeoutSeconds, int connectTimeoutSeconds, ObjectMapper objectMapper) {
+                              int readTimeoutSeconds, int connectTimeoutSeconds,
+                              int maxOutputTokens, ObjectMapper objectMapper) {
         HttpClient httpClient = HttpClient.create()
                 .responseTimeout(Duration.ofSeconds(readTimeoutSeconds))
                 .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, connectTimeoutSeconds * 1000);
@@ -54,6 +58,7 @@ public class OpenAiCompatClient implements LlmClient {
         this.model = model;
         this.temperature = temperature;
         this.readTimeoutSeconds = readTimeoutSeconds;
+        this.maxOutputTokens = maxOutputTokens;
     }
 
     @Override
@@ -63,13 +68,15 @@ public class OpenAiCompatClient implements LlmClient {
 
     @Override
     public Flux<String> stream(AiTaskType type, AiContext context, String systemPrompt, String userPrompt) {
-        Map<String, Object> body = Map.of(
-                "model", model,
-                "stream", true,
-                "temperature", temperature,
-                "messages", List.of(
-                        Map.of("role", "system", "content", systemPrompt),
-                        Map.of("role", "user", "content", userPrompt)));
+        Map<String, Object> body = new HashMap<>();
+        body.put("model", model);
+        body.put("stream", true);
+        body.put("temperature", temperature);
+        // 不设 max_tokens 时上游会按各自默认值截断，长章节常在收尾前被硬切断
+        body.put("max_tokens", maxOutputTokens);
+        body.put("messages", List.of(
+                Map.of("role", "system", "content", systemPrompt),
+                Map.of("role", "user", "content", userPrompt)));
         return webClient.post()
                 .uri("/chat/completions")
                 .bodyValue(body)

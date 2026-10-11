@@ -27,6 +27,10 @@ export interface Novel {
 
 export interface NovelDetail extends Novel {
   outline: string;
+  /** AI 生成的封面绘图提示词（可编辑） */
+  coverPrompt: string | null;
+  /** 作者名（封面署名；各发布平台笔名可能不同） */
+  authorName: string | null;
 }
 
 export interface ChapterMeta {
@@ -76,6 +80,21 @@ export interface ChapterOutlineItem {
   hasOutline: boolean;
   outline: string | null;
   updatedAt: string | null;
+}
+
+/** 大纲批量生成任务（后台逐章执行，前端轮询进度） */
+export interface OutlineTaskVO {
+  id: number;
+  novelId: number;
+  status: 'QUEUED' | 'RUNNING' | 'DONE' | 'FAILED' | 'CANCELLED';
+  total: number;
+  currentIndex: number;
+  currentTitle: string;
+  succeeded: number;
+  failed: number;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface AiConfigVO {

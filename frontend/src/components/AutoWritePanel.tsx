@@ -10,6 +10,7 @@ import {
   Progress,
   Radio,
   Row,
+  Select,
   Space,
   Switch,
   Table,
@@ -17,8 +18,22 @@ import {
   message,
 } from 'antd';
 import { DeleteOutlined, PauseCircleOutlined, PlayCircleOutlined, RobotOutlined } from '@ant-design/icons';
-import { taskApi } from '../api';
+import { novelApi, taskApi } from '../api';
 import type { WritingTaskVO } from '../api/types';
+
+/** 可选语言风格（与作品编辑面板保持一致，支持自定义输入） */
+const LANGUAGE_STYLES = [
+  '现代白话',
+  '古典文风',
+  '轻松幽默',
+  '热血激昂',
+  '文艺唯美',
+  '悬疑冷峻',
+  '简洁干练',
+  '口语化',
+  '华丽辞藻',
+  '画面感强',
+];
 
 const STATUS_TAG: Record<string, { color: string; text: string }> = {
   QUEUED: { color: 'blue', text: '排队中' },
@@ -30,28 +45,29 @@ const STATUS_TAG: Record<string, { color: string; text: string }> = {
 };
 
 /**
- * 自动创作面板：收集创作意图（模式/章节数/每章字数/全书大纲/章节大纲）并发起任务；
+ * 自动创作面板：收集创作意图（模式/章节数/全书大纲/章节大纲）并发起任务；
  * 轮询展示任务进度；CONFIRM 模式下支持逐章批准继续。
  * 任务进度变化时通过 onProgress 通知父页面刷新（如顶部字数统计）。
- * 默认章节数 6；默认每章字数 = 总字数 / 6（总字数未设置时兜底 1200，区间 300-5000）。
+ * 每章字数不由用户输入：后端按「全书总目标字数 ÷ 章节数」动态计算。
  */
 export default function AutoWritePanel({
   novelId,
   targetWords = 0,
+  languageStyle = null,
   onProgress,
+  onStyleChange,
 }: {
   novelId: number;
   targetWords?: number;
+  languageStyle?: string | null;
   onProgress?: () => void;
+  onStyleChange?: (style: string) => void;
 }) {
   const [form] = Form.useForm();
   const [tasks, setTasks] = useState<WritingTaskVO[]>([]);
   const [starting, setStarting] = useState(false);
   const [resumingId, setResumingId] = useState<number | null>(null);
   const prevSigRef = useRef('');
-
-  const defaultWordsPerChapter =
-    targetWords > 0 ? Math.max(300, Math.min(5000, Math.round(targetWords / 6))) : 1200;
 
   const activeCount = tasks.filter((t) =>
     ['QUEUED', 'RUNNING', 'WAITING_APPROVAL'].includes(t.status)
@@ -88,10 +104,17 @@ export default function AutoWritePanel({
     const values = await form.validateFields();
     setStarting(true);
     try {
+      // 语言风格作用于全书、且被 AI 提示词读取，因此保存到作品上（供后续所有生成沿用）
+      const style = Array.isArray(values.languageStyle)
+        ? values.languageStyle[0] ?? ''
+        : values.languageStyle ?? '';
+      if (style !== (languageStyle ?? '')) {
+        await novelApi.update(novelId, { languageStyle: style });
+        onStyleChange?.(style);
+      }
       await taskApi.start(novelId, {
         mode: values.mode,
         chapters: values.chapters,
-        wordsPerChapter: values.wordsPerChapter,
         genOutline: values.genOutline,
         autoOutline: values.autoOutline,
       });
@@ -121,7 +144,6 @@ export default function AutoWritePanel({
       await taskApi.start(t.novelId, {
         mode: t.mode,
         chapters: t.chapters,
-        wordsPerChapter: t.wordsPerChapter,
         genOutline: t.genOutline,
         autoOutline: t.autoOutline,
         startChapter: (t.currentChapter ?? 0) + 1,
@@ -161,13 +183,20 @@ export default function AutoWritePanel({
         <b>AI 自动创作</b>
         <span className="muted" style={{ marginLeft: 10 }}>
           一键流水线：全书大纲 → 章节大纲 → 逐章正文
+          {targetWords > 0 && <>（全书目标 {targetWords.toLocaleString()} 字，每章字数自动按章节数均摊）</>}
         </span>
       </div>
       <Card size="small" style={{ marginBottom: 16, background: '#fafaff' }}>
         <Form
           form={form}
           layout="inline"
-          initialValues={{ mode: 'AUTO', chapters: 6, wordsPerChapter: defaultWordsPerChapter, genOutline: true, autoOutline: true }}
+          initialValues={{
+            mode: 'AUTO',
+            chapters: 6,
+            genOutline: true,
+            autoOutline: true,
+            languageStyle: languageStyle ? [languageStyle] : [],
+          }}
           style={{ rowGap: 12 }}
         >
           <Form.Item name="mode" label="模式">
@@ -182,8 +211,15 @@ export default function AutoWritePanel({
           <Form.Item name="chapters" label="章节数" rules={[{ required: true }]}>
             <InputNumber min={1} max={50} style={{ width: 90 }} />
           </Form.Item>
-          <Form.Item name="wordsPerChapter" label="每章字数" rules={[{ required: true }]}>
-            <InputNumber min={300} max={5000} step={100} style={{ width: 110 }} />
+          <Form.Item name="languageStyle" label="语言风格" tooltip="决定 AI 的用词、句式与叙述调性，全书统一生效">
+            <Select
+              mode="tags"
+              maxCount={1}
+              allowClear
+              style={{ width: 160 }}
+              placeholder="选择或输入，如：轻松幽默"
+              options={LANGUAGE_STYLES.map((s) => ({ value: s, label: s }))}
+            />
           </Form.Item>
           <Form.Item name="genOutline" label="先生成大纲" valuePropName="checked">
             <Switch />

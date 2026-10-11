@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Button,
+  Input,
   Modal,
   Progress,
   Space,
@@ -13,6 +14,7 @@ import {
 import {
   ArrowLeftOutlined,
   EditOutlined,
+  RobotOutlined,
   UploadOutlined,
 } from "@ant-design/icons";
 import { useNavigate, useParams } from "react-router-dom";
@@ -206,6 +208,8 @@ export default function NovelDetail() {
               <AutoWritePanel
                 novelId={novelId}
                 targetWords={novel.targetWords ?? 0}
+                languageStyle={novel.languageStyle ?? null}
+                onStyleChange={() => load()}
                 onProgress={() => {
                   load();
                   setChapterRefresh((k) => k + 1);
@@ -345,18 +349,48 @@ function CoverModal({
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [promptText, setPromptText] = useState("");
+  const [authorName, setAuthorName] = useState("");
+  const [generatingPrompt, setGeneratingPrompt] = useState(false);
+  const [promptDirty, setPromptDirty] = useState(false);
 
   useEffect(() => {
     if (open) {
       setCoverUrl(novel.coverUrl ?? null);
+      setPromptText(novel.coverPrompt ?? "");
+      setAuthorName(novel.authorName ?? "");
+      setPromptDirty(false);
     }
-  }, [open, novel.coverUrl]);
+  }, [open, novel.coverUrl, novel.coverPrompt, novel.authorName]);
+
+  /** 流式生成封面绘图提示词（AI 依据书名/题材/简介/人物/大纲生成；作者名原样写入，不允许改写） */
+  const genCoverPrompt = async () => {
+    setGeneratingPrompt(true);
+    setPromptText("");
+    try {
+      await streamSse(
+        `/api/ai/novels/${novel.id}/cover-prompt`,
+        { authorName: authorName.trim() || null },
+        {
+          onDelta: (d) => setPromptText((t) => t + d),
+        },
+      );
+      setPromptDirty(true);
+      message.success("封面提示词已生成，可直接编辑后保存");
+    } catch (e: any) {
+      message.error(e?.message ?? "生成失败");
+    } finally {
+      setGeneratingPrompt(false);
+    }
+  };
 
   const save = async () => {
     setSaving(true);
     try {
       const saved = await novelApi.update(novel.id, {
         coverUrl: coverUrl ?? "",
+        coverPrompt: promptText,
+        authorName: authorName.trim(),
       });
       onSaved(saved);
       onClose();
@@ -375,6 +409,8 @@ function CoverModal({
       onOk={save}
       okText="保存"
       confirmLoading={saving}
+      width={720}
+      destroyOnHidden
     >
       <div style={{ display: "flex", gap: 20, alignItems: "center" }}>
         <div
@@ -445,6 +481,74 @@ function CoverModal({
             </Button>
           )}
         </div>
+      </div>
+
+      <div style={{ marginTop: 20 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+            marginBottom: 8,
+          }}
+        >
+          <span style={{ whiteSpace: "nowrap" }}>
+            <b>封面提示词</b>
+            <span className="muted" style={{ marginLeft: 8, fontSize: 12 }}>
+              默认让画面直接排出书名，生成的提示词可投喂给 AI 绘图模型
+            </span>
+          </span>
+          <Button
+            type="primary"
+            ghost
+            icon={<RobotOutlined />}
+            loading={generatingPrompt}
+            onClick={genCoverPrompt}
+          >
+            {promptText ? "重新生成" : "AI 生成封面提示词"}
+          </Button>
+        </div>
+        <div
+          style={{
+            marginBottom: 10,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          <span>作者名（选填）：</span>
+          <Input
+            value={authorName}
+            style={{ width: 220 }}
+            onChange={(e) => setAuthorName(e.target.value)}
+            maxLength={30}
+            allowClear
+            placeholder="<笔名>会原样排版到封面上"
+            disabled={generatingPrompt}
+          />
+        </div>
+        <Input.TextArea
+          value={promptText}
+          onChange={(e) => {
+            setPromptText(e.target.value);
+            setPromptDirty(true);
+          }}
+          rows={10}
+          maxLength={2000}
+          showCount
+          placeholder="点击右上角按钮自动生成；也可以直接手写。提示词会让画面直接排出书名，出图后即可作为封面使用。"
+          disabled={generatingPrompt}
+          style={{ marginBottom: 16 }}
+        />
+        {promptDirty && !generatingPrompt && (
+          <p
+            className="muted"
+            style={{ marginTop: 6, marginBottom: 0, fontSize: 12 }}
+          >
+            提示词已修改，点「保存」后生效。
+          </p>
+        )}
       </div>
     </Modal>
   );

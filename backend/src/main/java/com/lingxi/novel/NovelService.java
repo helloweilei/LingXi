@@ -97,6 +97,12 @@ public class NovelService {
         if (req.coverUrl() != null) {
             novel.setCoverUrl(req.coverUrl());
         }
+        if (req.coverPrompt() != null) {
+            novel.setCoverPrompt(req.coverPrompt());
+        }
+        if (req.authorName() != null) {
+            novel.setAuthorName(req.authorName());
+        }
         if (req.outline() != null) {
             novel.setOutline(req.outline());
         }
@@ -159,6 +165,7 @@ public class NovelService {
     private static DetailVO toDetailVO(Novel n, Long chapterCount) {
         return new DetailVO(n.getId(), n.getTitle(), n.getDescription(), n.getGenre(), n.getStatus(),
                 n.getTargetWords(), n.getWordCount(), n.getCoverColor(), n.getCoverUrl(), n.getOutline(),
-                n.getLanguageStyle(), chapterCount, n.getCreatedAt(), n.getUpdatedAt());
+                n.getLanguageStyle(), n.getCoverPrompt(), n.getAuthorName(),
+                chapterCount, n.getCreatedAt(), n.getUpdatedAt());
     }
 }

@@ -22,6 +22,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.regex.Pattern;
 
 /**
  * 启发式创作引导：把「零想法 / 一句话种子」通过问答或扩展，转化为多套原创小说方案，
@@ -50,12 +51,21 @@ public class IdeaGuideService {
                     List.of("复仇", "成长", "解密", "救赎", "逆袭", "守护", "权谋", "生存")),
             new GuideDtos.Question("length", "篇幅期望", "预计篇幅多大？（也可自行填写）",
                     List.of("短篇10万字内", "中篇30-50万", "长篇百万+", "连载不限")),
+            new GuideDtos.Question("words", "目标字数", "全书大概想写多少字？可选下方档位，也可直接填确切数字（如「50万」「100万字」「8000字」）",
+                    List.of("10万", "30万", "50万", "100万", "200万", "不设上限")),
             new GuideDtos.Question("platform", "目标平台", "打算发到哪些平台？（这也影响节奏与爽点设计，也可自行填写）",
                     List.of("起点", "番茄", "晋江", "自有书城", "多平台同步", "微信读书")));
 
     private static final Map<String, String> FIELD_LABEL = Map.of(
             "genre", "题材", "tone", "基调", "audience", "目标读者",
-            "conflict", "核心冲突", "length", "篇幅期望", "platform", "目标平台");
+            "conflict", "核心冲突", "length", "篇幅期望", "words", "目标字数",
+            "platform", "目标平台");
+
+    /** 未指定字数时的默认目标（30 万字） */
+    private static final int DEFAULT_TARGET_WORDS = 300000;
+
+    /** 中文数字（用于解析「二十万」这类写法），含十与百 */
+    private static final String CN_DIGITS = "零一二三四五六七八九十百";
 
     private final CreativeIntentRepository repository;
     private final LlmClientProvider llmClientProvider;
@@ -156,7 +166,11 @@ public class IdeaGuideService {
         String title = str(p, "title", "未命名新书");
         String premise = str(p, "premise", "");
         Map<String, String> answers = readAnswers(intent.getSeedJson());
-        int targetWords = deriveTarget(answers.getOrDefault("length", ""));
+        // 目标字数：优先取用户填写的「确切字数」，没有则按篇幅期望档位推导
+        Integer exactWords = parseExactWords(answers.get("words"));
+        int targetWords = exactWords != null
+                ? exactWords
+                : deriveTarget(answers.getOrDefault("length", ""));
         NovelDtos.CreateReq createReq = new NovelDtos.CreateReq(
                 title, limit(premise, 1000), limit(answers.getOrDefault("genre", ""), 30), targetWords, null, null);
         NovelDtos.VO novel = novelService.create(user, createReq);
@@ -164,8 +178,8 @@ public class IdeaGuideService {
 
         String outline = str(p, "outline", "");
         if (!outline.isBlank()) {
-            novelService.update(novelId, user, new NovelDtos.UpdateReq(
-                    null, null, null, null, null, null, null, limit(outline, 30000), null));
+            novelService.update(novelId, user,
+                    NovelDtos.UpdateReq.builder().outline(limit(outline, 30000)).build());
         }
 
         JsonNode chars = p.get("characters");
@@ -287,20 +301,104 @@ public class IdeaGuideService {
         return s.length() <= max ? s : s.substring(0, max);
     }
 
-    private static int deriveTarget(String length) {
+    /**
+     * 由「篇幅期望」推导全书目标字数。
+     * 优先识别用户填写的**确切字数**（如「50万」「100万字」「8000字」「120w」），取不到再按短/中/长回落。
+     * 这样问答模式下用户既能选粗档，也能直接写具体字数。
+     */
+    static int deriveTarget(String length) {
+        Integer exact = parseExactWords(length);
+        if (exact != null) {
+            return exact;
+        }
         if (length == null) {
-            return 300000;
+            return DEFAULT_TARGET_WORDS;
         }
         if (length.contains("短")) {
             return 100000;
         }
-        if (length.contains("中")) {
-            return 300000;
-        }
         if (length.contains("长")) {
             return 1000000;
         }
-        return 300000;
+        if (length.contains("中")) {
+            return 300000;
+        }
+        return DEFAULT_TARGET_WORDS;
+    }
+
+    /** 从自然语言中解析确切字数，支持「50万」「100万字」「8000字」「120w」「二十万」等写法；无法解析返回 null */
+    private static Integer parseExactWords(String s) {
+        if (s == null || s.isBlank()) {
+            return null;
+        }
+        // 「二十万」等中文数字：必须紧邻「万/字/w」等量词才采信，避免「中篇」「十二生肖」等误判
+        java.util.regex.Matcher cn = Pattern
+                .compile("([零一二三四五六七八九十百]+)\\s*(万|字|w|W)").matcher(s);
+        if (cn.find()) {
+            int val = parseChineseNumber(cn.group(1));
+            if (val > 0) {
+                int total = applyUnit(val, cn.group(2));
+                if (total > 0) {
+                    return normalizeWords(total);
+                }
+            }
+        }
+        // 阿拉伯数字：「50万」「100万字」「8000字」「120w」「中篇30-50万」→ 取其中最大者（区间取上限）
+        java.util.regex.Matcher m = Pattern.compile("(\\d+(?:\\.\\d+)?)\\s*([万wW千kK]?)").matcher(s);
+        int best = 0;
+        while (m.find()) {
+            try {
+                double num = Double.parseDouble(m.group(1));
+                best = Math.max(best, applyUnit((int) Math.round(num), m.group(2)));
+            } catch (NumberFormatException ignored) {
+                // 继续尝试下一个匹配
+            }
+        }
+        return best > 0 ? normalizeWords(best) : null;
+    }
+
+    private static int applyUnit(int num, String unit) {
+        if (unit == null || unit.isBlank()) {
+            return num;
+        }
+        char c = unit.charAt(0);
+        if (c == '万' || c == 'w' || c == 'W') {
+            return (int) (num * 10_000);
+        }
+        if (c == '千' || c == 'k' || c == 'K') {
+            return num * 1000;
+        }
+        return num;
+    }
+
+    /** 约束到合理区间（1 万 ~ 1000 万字），避免用户误填导致异常 */
+    private static int normalizeWords(int words) {
+        return Math.max(10_000, Math.min(10_000_000, words));
+    }
+
+    private static int parseChineseNumber(String cn) {
+        if (cn.isEmpty()) {
+            return 0;
+        }
+        // 常见写法：十 / 二十 / 三十五 / 一百二十（百量级不在此支持，够用即可）
+        int total = 0;
+        int section = 0;
+        int current = 0;
+        for (int i = 0; i < cn.length(); i++) {
+            int d = CN_DIGITS.indexOf(cn.charAt(i));
+            if (d < 0) {
+                continue;
+            }
+            if (d >= 10) {
+                // 十(10) / 百(100)
+                section += (current == 0 ? 1 : current) * d;
+                current = 0;
+            } else {
+                current = d;
+            }
+            total = section + current;
+        }
+        return total;
     }
 
     private void saveProposals(CreativeIntent intent, String raw) {
@@ -317,7 +415,6 @@ public class IdeaGuideService {
         sb.append("以下是用户填写的创作偏好，请基于它们策划 3 套差异化、可落地的原创小说方案：\n");
         answers.forEach((k, v) -> sb.append("- ").append(FIELD_LABEL.getOrDefault(k, k)).append("：").append(v).append("\n"));
         sb.append("""
-                
                 【要求】
                 1. 输出一个 JSON 数组，包含 3 个对象；
                 2. 每个对象字段：title（书名）、premise（一句话梗概/卖点）、world（世界观要点）、protagonist（主角设定）、outline（分卷大纲草案，用 \\n 换行）、characters（数组，每项 {name,role,description}）、worlds（数组，每项 {title,content}）、platform（目标平台，来自用户输入）；

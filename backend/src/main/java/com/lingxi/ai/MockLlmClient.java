@@ -5,6 +5,7 @@ import reactor.core.publisher.Flux;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 
 /**
  * 内置离线示例引擎：无需 API Key 即可完整体验全流程。
@@ -28,6 +29,8 @@ public class MockLlmClient implements LlmClient {
             case CHAT -> chat(ctx);
             case CHAPTER_OUTLINE -> chapterOutline(ctx);
             case GUIDE_PROPOSAL -> guideProposals(ctx);
+            case COVER_PROMPT -> coverPrompt(ctx, userPrompt);
+            case CHAPTER_TITLE -> chapterTitle(ctx);
         };
         List<String> chunks = new ArrayList<>();
         int i = 0;
@@ -122,6 +125,38 @@ public class MockLlmClient implements LlmClient {
                 """, hero, title, genre);
     }
 
+    private String coverPrompt(AiContext ctx, String userPrompt) {
+        String title = blank(ctx.novelTitle()) ? "未命名新书" : ctx.novelTitle();
+        String genre = blank(ctx.genre()) ? "东方幻想" : ctx.genre();
+        // 从提示词中取出用户指定的作者名（格式：`作者名为「XXX」`），确保示例也原样回显、不杜撰
+        String author = "";
+        if (userPrompt != null) {
+            java.util.regex.Matcher m = Pattern.compile("作者名为「(.+?)」").matcher(userPrompt);
+            if (m.find()) {
+                author = m.group(1);
+            }
+        }
+        String authorLine = blank(author)
+                ? "\n\n作者名区域：未指定具体署名，请预留书名下方或封面底部位置。严禁杜撰任何作者名或笔名。"
+                : "\n\n作者名区域：必须严格使用「" + author + "」并逐字原样呈现，严禁编造或改写；"
+                + "位于书名下方居中，字号明显小于书名，使用细黑体、暗金色，与书名保持协调。";
+        return String.format("""
+                竖版网络小说封面，比例 2:3。
+
+【主体】以「%1$s」的书名意象为中心视觉：画面中央是一道由%2$s气息凝聚而成的门扉，门缝透出暖金光，暗示主角即将踏入未知世界。
+
+【构图】近景仰视，主体居中偏上，人物与门扉不与文字区域重叠。
+
+【风格】%2$s题材，水墨与厚涂结合，冷蓝主调配暖橙点缀，光影对比强烈，质感高级。
+
+【细节】加入飘散的符箓、垂落的锁链等象征性元素作为前景虚化，背景是深邃星空与孤塔剪影；整体偏暗、留白克制，营造悬疑期待感。
+
+【书名与作者名排版】封面需直接呈现书名文字「%1$s」：使用厚重书法体，字号醒目，位于画面上方居中，金色描边加暗色投影确保在暗背景上清晰可读；文字不得压在人脸或门扉主体之上。%3$s
+
+负面提示词：文字乱码、错别字、变形文字、重复文字、错误或虚构的作者名、低分辨率、模糊、噪点、过曝、水印、平台 logo、拼贴感、廉价感。
+                """, title, genre, authorLine);
+    }
+
     private String continueText(AiContext ctx) {
         String hero = (ctx.characterNames() == null || ctx.characterNames().isEmpty())
                 ? "他" : ctx.characterNames().get(0);
@@ -194,19 +229,26 @@ public class MockLlmClient implements LlmClient {
     }
 
     private String chapterOutline(AiContext ctx) {
-        String title = blank(ctx.novelTitle()) ? "未命名新书" : ctx.novelTitle();
         String lead = (ctx.characterNames() == null || ctx.characterNames().isEmpty())
                 ? "主角" : ctx.characterNames().get(0);
         return String.format("""
-                【本章大纲（示例）· 《%1$s》】
-                1. 开篇钩子：以%3$s的一个细微异常切入，制造悬念，把读者拉进本章情境。
-                2. 场景推进：在熟悉的场景里插入一次意外遭遇，迫使%3$s做出选择。
-                3. 人物弧光：通过一次对话或内心独白，揭示%3$s隐藏的动机或软肋。
-                4. 冲突升级：敌对势力/环境压力加码，把本章矛盾推到临界点。
-                5. 收尾钩子：以一封信、一个消失的身影或一个未接的承诺收束，为下一章留悬念。
+                章节名：%s雨夜里的那封信
 
-                （Mock 引擎仅生成占位大纲；接入真实模型后，将依据全书大纲与角色设定产出贴合的章节规划。）
-                """, title, "", lead);
+                大纲：
+                1. 开篇钩子：以%s的一个细微异常切入，制造悬念，把读者拉进本章情境。
+                2. 场景推进：在熟悉的场景里插入一次意外遭遇，迫使%s做出选择。
+                3. 人物弧光：通过一次对话或内心独白，揭示%s隐藏的动机或软肋。
+                4. 矛盾闭合：本章主要冲突给出阶段性结果（%s付出代价后暂时脱身，但暴露了更大问题）。
+                5. 收尾钩子：以一封没有署名的信收束，为下一章留悬念。
+
+                （Mock 引擎仅生成占位内容；接入真实模型后，将依据全书大纲与角色设定产出贴合的章节规划。）
+                """, lead);
+    }
+
+    private String chapterTitle(AiContext ctx) {
+        String lead = (ctx.characterNames() == null || ctx.characterNames().isEmpty())
+                ? "主角" : ctx.characterNames().get(0);
+        return String.format("%s雨夜里的那封信", lead);
     }
 
     private String guideProposals(AiContext ctx) {

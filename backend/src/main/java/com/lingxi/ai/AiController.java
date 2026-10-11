@@ -26,6 +26,10 @@ import java.util.Map;
 @RequestMapping("/api/ai")
 public class AiController {
 
+    /** 生成整章正文的请求：可选传入全书总章节数，用于判断本章是否为终章（决定是否收束全书） */
+    record WriteReq(Integer totalChapters) {
+    }
+
     private static final Logger log = LoggerFactory.getLogger(AiController.class);
 
     private final AiService aiService;
@@ -82,6 +86,26 @@ public class AiController {
         return toSse(aiService.generateChapterOutline(novelId, chapterId, user));
     }
 
+    /** 生成封面提示词请求：authorName 可选，作者名会原样写入提示词并禁止 AI 改写 */
+    record CoverReq(String authorName) {
+    }
+
+    /** 为未命名章节生成一个有信息量的章节名（流式，输出可直接用作标题） */
+    @PostMapping(value = "/novels/{novelId}/chapters/{chapterId}/title", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<ServerSentEvent<String>> chapterTitle(@AuthenticationPrincipal User user,
+                                                       @PathVariable Long novelId,
+                                                       @PathVariable Long chapterId) {
+        return toSse(aiService.chapterTitle(novelId, chapterId, user));
+    }
+
+    @PostMapping(value = "/novels/{novelId}/cover-prompt", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<ServerSentEvent<String>> coverPrompt(@AuthenticationPrincipal User user,
+                                                      @PathVariable Long novelId,
+                                                      @RequestBody(required = false) CoverReq req) {
+        String authorName = req != null ? req.authorName() : null;
+        return toSse(aiService.coverPrompt(novelId, authorName, user));
+    }
+
     /**
      * 根据章节大纲生成整章正文：流式输出，并在完成后整章覆盖写入（旧内容由 ChapterService 自动留版本快照）。
      * 每章目标字数由后端按“总目标字数 / 章节数”动态计算，前端无需也不应传入字数。
@@ -90,8 +114,10 @@ public class AiController {
     @PostMapping(value = "/novels/{novelId}/chapters/{chapterId}/write", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<String>> writeChapter(@AuthenticationPrincipal User user,
                                                       @PathVariable Long novelId,
-                                                      @PathVariable Long chapterId) {
-        return toSse(aiService.writeChapterAndSave(novelId, chapterId, user));
+                                                      @PathVariable Long chapterId,
+                                                      @RequestBody(required = false) WriteReq req) {
+        Integer total = req != null ? req.totalChapters() : null;
+        return toSse(aiService.writeChapterAndSave(novelId, chapterId, user, total));
     }
 
     private Flux<ServerSentEvent<String>> toSse(Flux<String> deltas) {

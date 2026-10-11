@@ -6,6 +6,8 @@ import com.lingxi.memory.dto.MemoryDtos.MemoryVO;
 import com.lingxi.memory.dto.MemoryDtos.OutlineItemVO;
 import com.lingxi.memory.dto.MemoryDtos.OutlineReq;
 import com.lingxi.memory.dto.MemoryDtos.StoryBrainReq;
+import com.lingxi.memory.dto.OutlineTaskDtos.StartReq;
+import com.lingxi.memory.dto.OutlineTaskDtos.TaskVO;
 import com.lingxi.user.User;
 import jakarta.validation.Valid;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -23,9 +25,11 @@ import java.util.List;
 public class MemoryController {
 
     private final MemoryService memoryService;
+    private final OutlineTaskService outlineTaskService;
 
-    public MemoryController(MemoryService memoryService) {
+    public MemoryController(MemoryService memoryService, OutlineTaskService outlineTaskService) {
         this.memoryService = memoryService;
+        this.outlineTaskService = outlineTaskService;
     }
 
     /** 全书记忆视图：章节大纲（按章序）+ 故事脑 */
@@ -47,12 +51,47 @@ public class MemoryController {
         return ApiResponse.ok(memoryService.outlines(novelId, user));
     }
 
-    /** 一键 / 批量生成大纲（body 可指定 chapterIds，留空则生成全书未生成大纲的章节） */
+    /** 一键 / 批量生成大纲（body 可指定 chapterIds，留空则生成全书未生成大纲的章节；不会创建章节） */
     @PostMapping("/api/novels/{novelId}/outlines/generate")
     public ApiResponse<List<OutlineItemVO>> generate(@AuthenticationPrincipal User user, @PathVariable Long novelId,
                                                      @RequestBody(required = false) GenerateReq req) {
         List<Long> ids = req == null ? null : req.chapterIds();
         return ApiResponse.ok(memoryService.generate(novelId, user, ids));
+    }
+
+    /**
+     * 提交大纲批量生成任务（推荐）：后台线程池逐章生成，避免同步串行调用 LLM 触发 HTTP 超时。
+     * 仅对已存在的章节生成大纲，不会创建章节。
+     */
+    @PostMapping("/api/novels/{novelId}/outline-tasks")
+    public ApiResponse<TaskVO> startOutlineTask(@AuthenticationPrincipal User user, @PathVariable Long novelId,
+                                                @RequestBody(required = false) StartReq req) {
+        return ApiResponse.ok(outlineTaskService.start(novelId, user, req));
+    }
+
+    /** 某本书的大纲生成任务列表（近 20 条） */
+    @GetMapping("/api/novels/{novelId}/outline-tasks")
+    public ApiResponse<List<TaskVO>> listOutlineTasks(@AuthenticationPrincipal User user, @PathVariable Long novelId) {
+        return ApiResponse.ok(outlineTaskService.list(novelId, user));
+    }
+
+    /** 大纲任务详情（前端轮询进度） */
+    @GetMapping("/api/outline-tasks/{taskId}")
+    public ApiResponse<TaskVO> getOutlineTask(@AuthenticationPrincipal User user, @PathVariable Long taskId) {
+        return ApiResponse.ok(outlineTaskService.get(taskId, user));
+    }
+
+    /** 取消大纲生成任务 */
+    @PostMapping("/api/outline-tasks/{taskId}/cancel")
+    public ApiResponse<TaskVO> cancelOutlineTask(@AuthenticationPrincipal User user, @PathVariable Long taskId) {
+        return ApiResponse.ok(outlineTaskService.cancel(taskId, user));
+    }
+
+    /** 删除已结束的大纲任务记录 */
+    @DeleteMapping("/api/outline-tasks/{taskId}")
+    public ApiResponse<Void> removeOutlineTask(@AuthenticationPrincipal User user, @PathVariable Long taskId) {
+        outlineTaskService.remove(taskId, user);
+        return ApiResponse.ok();
     }
 
     /** 手动新增 / 编辑单章大纲 */

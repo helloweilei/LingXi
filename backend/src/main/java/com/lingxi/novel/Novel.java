@@ -53,8 +53,16 @@ public class Novel {
     @Column(name = "cover_url", length = 500)
     private String coverUrl;
 
+    /** 封面提示词：AI 依据作品设定生成，可编辑；用于外部绘图/复现封面 */
+    @Column(name = "cover_prompt", length = 2000)
+    private String coverPrompt;
+
+    /** 作者名（封面署名；各发布平台笔名可能不同），空/空串表示未设置 */
+    @Column(name = "author_name", length = 30)
+    private String authorName;
+
     /** 语言风格（AI 写作文风约束），空/空串表示未设置 */
-    @Column(name = "language_style", length = 50)
+    @Column(name = "language_style", length = 200)
     private String languageStyle;
 
     @Column(name = "created_at", nullable = false)
@@ -156,6 +164,22 @@ public class Novel {
 
     public void setCoverUrl(String coverUrl) {
         this.coverUrl = coverUrl;
+    }
+
+    public String getCoverPrompt() {
+        return coverPrompt;
+    }
+
+    public void setCoverPrompt(String coverPrompt) {
+        this.coverPrompt = coverPrompt;
+    }
+
+    public String getAuthorName() {
+        return authorName;
+    }
+
+    public void setAuthorName(String authorName) {
+        this.authorName = authorName;
     }
 
     public String getLanguageStyle() {

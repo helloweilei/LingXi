@@ -8,6 +8,7 @@ import type {
   CharacterVO,
   Novel,
   NovelDetail,
+  OutlineTaskVO,
   WorldVO,
   WritingTaskVO,
 } from './types';
@@ -20,6 +21,10 @@ export interface NovelSaveReq {
   targetWords?: number | null;
   coverColor?: string;
   coverUrl?: string | null;
+  /** 封面绘图提示词（可编辑，保存到 novel.coverPrompt） */
+  coverPrompt?: string | null;
+  /** 作者名（封面署名） */
+  authorName?: string | null;
   outline?: string;
   languageStyle?: string | null;
 }
@@ -87,9 +92,12 @@ export const uploadApi = {
 export const outlineApi = {
   /** 章节大纲列表：每个章节一行，含是否已生成 */
   list: (novelId: number) => get<ChapterOutlineItem[]>(`/novels/${novelId}/outlines`),
-  /** 一键 / 批量生成大纲；不传 chapterIds 则生成全书未生成大纲的章节 */
+  /** 一键 / 批量生成大纲（同步，仅适合少量章节）；批量请用 outlineTaskApi 异步执行。不会创建章节 */
   generate: (novelId: number, chapterIds?: number[]) =>
-    post<ChapterOutlineItem[]>(`/novels/${novelId}/outlines/generate`, chapterIds ? { chapterIds } : {}),
+    post<ChapterOutlineItem[]>(
+      `/novels/${novelId}/outlines/generate`,
+      chapterIds ? { chapterIds } : {}
+    ),
   /** 手动新增 / 编辑单章大纲 */
   save: (novelId: number, chapterId: number, outline: string) =>
     put<void>(`/novels/${novelId}/outlines/${chapterId}`, { outline }),
@@ -98,10 +106,19 @@ export const outlineApi = {
     del(`/novels/${novelId}/outlines/${chapterId}`),
 };
 
+/** 大纲批量生成任务：后台逐章执行，前端轮询进度，避免长任务触发 HTTP 超时 */
+export const outlineTaskApi = {
+  start: (novelId: number, req: { chapterIds?: number[] }) =>
+    post<OutlineTaskVO>(`/novels/${novelId}/outline-tasks`, req),
+  list: (novelId: number) => get<OutlineTaskVO[]>(`/novels/${novelId}/outline-tasks`),
+  get: (taskId: number) => get<OutlineTaskVO>(`/outline-tasks/${taskId}`),
+  cancel: (taskId: number) => post<OutlineTaskVO>(`/outline-tasks/${taskId}/cancel`, {}),
+  remove: (taskId: number) => del(`/outline-tasks/${taskId}`),
+};
+
 export interface AutoWriteReq {
   mode: string;
   chapters?: number;
-  wordsPerChapter?: number;
   genOutline?: boolean;
   autoOutline?: boolean;
   /** 从第 N 章续跑（失败任务断点续写用） */

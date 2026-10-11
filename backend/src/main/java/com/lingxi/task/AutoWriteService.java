@@ -146,7 +146,7 @@ public class AutoWriteService {
         if (Boolean.TRUE.equals(task.getGeneratedOutline())) {
             Novel novel = novelService.loadOwned(task.getNovelId(), user);
             if (novel.getOutline() != null && !novel.getOutline().isBlank()) {
-                novelService.update(novel.getId(), user, new UpdateReq(null, null, null, null, null, null, null, "", null));
+                novelService.update(novel.getId(), user, UpdateReq.builder().outline("").build());
             }
         }
         taskRepository.delete(task);
@@ -183,8 +183,7 @@ public class AutoWriteService {
             if (p.genOutline && (novel.getOutline() == null || novel.getOutline().isBlank())) {
                 String outline = collect(aiService.outline(novel.getId(), user));
                 if (!outline.isBlank()) {
-                    novelService.update(novel.getId(), user,
-                            new UpdateReq(null, null, null, null, null, null, null, outline, null));
+                    novelService.update(novel.getId(), user, UpdateReq.builder().outline(outline).build());
                     task.setGeneratedOutline(true);
                     saveTask(task);
                 }
@@ -229,7 +228,7 @@ public class AutoWriteService {
                         log.warn("Auto write novel {} chapter {} returned blank content, retry {}/3",
                                 novel.getId(), next, attempt);
                     }
-                    content = collect(aiService.writeChapter(novel.getId(), chapterId, user));
+                    content = collect(aiService.writeChapter(novel.getId(), chapterId, user, p.chapters));
                 }
                 if (content.isBlank()) {
                     throw new BizException(502, "AI 未生成正文（第 " + next + " 章）", 502);

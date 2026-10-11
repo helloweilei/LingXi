@@ -8,5 +8,7 @@ public enum AiTaskType {
     EXPAND,
     CHAT,
     CHAPTER_OUTLINE,
-    GUIDE_PROPOSAL
+    GUIDE_PROPOSAL,
+    COVER_PROMPT,
+    CHAPTER_TITLE
 }

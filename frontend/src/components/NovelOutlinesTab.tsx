@@ -1,16 +1,29 @@
-import { useCallback, useEffect, useState } from "react";
-import { Button, Dropdown, Empty, Input, Modal, Space, Spin, Table, Typography, message } from "antd";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  Alert,
+  Button,
+  Dropdown,
+  Empty,
+  Input,
+  Modal,
+  Progress,
+  Space,
+  Spin,
+  Table,
+  Tooltip,
+  Typography,
+  message,
+} from "antd";
 import { DeleteOutlined, EditOutlined, FileAddOutlined, RobotOutlined } from "@ant-design/icons";
-import { outlineApi } from "../api";
+import { outlineApi, outlineTaskApi } from "../api";
 import { streamSse } from "../api/ai";
-import type { ChapterOutlineItem } from "../api/types";
+import type { ChapterOutlineItem, OutlineTaskVO } from "../api/types";
 
 const { Paragraph } = Typography;
 
 export default function OutlineTab({ novelId }: { novelId: number }) {
   const [items, setItems] = useState<ChapterOutlineItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [generating, setGenerating] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [editing, setEditing] = useState<ChapterOutlineItem | null>(null);
   const [editText, setEditText] = useState("");
@@ -19,6 +32,8 @@ export default function OutlineTab({ novelId }: { novelId: number }) {
   const [writeTitle, setWriteTitle] = useState("");
   const [writeText, setWriteText] = useState("");
   const [writingId, setWritingId] = useState<number | null>(null);
+  const [task, setTask] = useState<OutlineTaskVO | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -36,19 +51,84 @@ export default function OutlineTab({ novelId }: { novelId: number }) {
   }, [load]);
 
   const missing = items.filter((i) => !i.hasOutline).length;
+  const hasOutlines = items.some((i) => i.hasOutline);
+  const running = task != null && ["QUEUED", "RUNNING"].includes(task.status);
 
-  const generateAll = async () => {
-    setGenerating(true);
-    try {
-      setItems(await outlineApi.generate(novelId));
-      message.success("大纲已生成");
-    } catch (e: any) {
-      message.error(e?.message ?? "生成失败");
-    } finally {
-      setGenerating(false);
+  const stopPolling = () => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
     }
   };
 
+  /** 轮询任务进度；任务结束后刷新章节大纲列表 */
+  const pollTask = useCallback(
+    async (taskId: number) => {
+      try {
+        const t = await outlineTaskApi.get(taskId);
+        setTask(t);
+        if (!["QUEUED", "RUNNING"].includes(t.status)) {
+          stopPolling();
+          load();
+          if (t.status === "DONE") {
+            message.success(
+              `大纲生成完成：成功 ${t.succeeded} 章${t.failed > 0 ? `，失败 ${t.failed} 章` : ""}`,
+            );
+          } else if (t.status === "CANCELLED") {
+            message.info(`已取消，完成 ${t.succeeded} 章`);
+          } else if (t.status === "FAILED") {
+            message.error(t.error ?? "生成失败");
+          }
+        }
+      } catch (e: any) {
+        stopPolling();
+        message.error(e?.message ?? "查询进度失败");
+      }
+    },
+    [load]
+  );
+
+  /** 提交异步任务：后台逐章生成，不阻塞页面（仅对已存在的章节生成，不创建章节） */
+  const startTask = async (req: { chapterIds?: number[] }) => {
+    try {
+      const t = await outlineTaskApi.start(novelId, req);
+      setTask(t);
+      stopPolling();
+      pollRef.current = setInterval(() => pollTask(t.id), 2000);
+      message.info("已开始生成大纲，可离开本页，进度会自动刷新");
+    } catch (e: any) {
+      message.error(e?.message ?? "提交失败");
+    }
+  };
+
+  const cancelTask = async () => {
+    if (!task) return;
+    try {
+      const t = await outlineTaskApi.cancel(task.id);
+      setTask(t);
+      message.info("已取消");
+    } catch (e: any) {
+      message.error(e?.message ?? "取消失败");
+    }
+  };
+
+  /** 一键生成大纲：仅对已存在的章节生成，不创建章节；无章节时引导去「章节」页新建 */
+  const generateAll = () => {
+    if (running) {
+      return;
+    }
+    if (items.length === 0) {
+      message.warning("还没有章节，请先到「章节」页新建章节，再来规划大纲");
+      return;
+    }
+    if (missing === 0) {
+      message.info("所有章节都已有大纲，无需重复生成");
+      return;
+    }
+    void startTask({});
+  };
+
+  /** 单章生成/重生成：走同步接口（一章一次调用，不会超时） */
   const generateOne = async (chapterId: number) => {
     try {
       setItems(await outlineApi.generate(novelId, [chapterId]));
@@ -57,6 +137,9 @@ export default function OutlineTab({ novelId }: { novelId: number }) {
       message.error(e?.message ?? "生成失败");
     }
   };
+
+  // 组件卸载时清理轮询
+  useEffect(() => stopPolling, []);
 
   const openEdit = (item: ChapterOutlineItem) => {
     setEditing(item);
@@ -103,10 +186,9 @@ export default function OutlineTab({ novelId }: { novelId: number }) {
     try {
       await streamSse(
         `/api/ai/novels/${novelId}/chapters/${item.chapterId}/write`,
-        null,
+        { totalChapters: items.length },
         {
           onDelta: (d) => setWriteText((t) => t + d),
-          onError: (m) => message.error(m),
         },
       );
       message.success("正文已生成并保存");
@@ -121,21 +203,25 @@ export default function OutlineTab({ novelId }: { novelId: number }) {
 
   /** 生成前覆盖确认：章节已有正文时弹窗提示，否则直接生成 */
   const confirmWrite = (item: ChapterOutlineItem) => {
-    Modal.confirm({
-      title: "确认",
-      content:
-        "如果该章已有正文，生成将覆盖旧内容（已自动留版本快照，可回滚）。确定继续？",
-      okText: "生成",
-      okButtonProps: { danger: false },
-      onOk: () => writeOne(item),
-    });
+    if (item.hasContent) {
+      Modal.confirm({
+        title: "覆盖确认",
+        content:
+          "该章已有正文，生成将覆盖旧内容（已自动留版本快照，可回滚）。确定继续？",
+        okText: "覆盖生成",
+        okButtonProps: { danger: true },
+        onOk: () => writeOne(item),
+      });
+    } else {
+      writeOne(item);
+    }
   };
 
-  /** 一键为全部已规划大纲的章节生成正文（顺序执行） */
+  /** 一键为全部已规划大纲的章节生成正文（顺序执行）；仅在存在大纲时由按钮触发 */
   const writeAll = async () => {
     const targets = items.filter((i) => i.hasOutline);
     if (targets.length === 0) {
-      message.warning("请先为章节生成大纲，再据此生成正文");
+      message.warning("还没有章节大纲，请先点「一键生成大纲」规划后再生成正文");
       return;
     }
     setWriteOpen(true);
@@ -151,17 +237,16 @@ export default function OutlineTab({ novelId }: { novelId: number }) {
         setWriteText("");
         await streamSse(
           `/api/ai/novels/${novelId}/chapters/${it.chapterId}/write`,
-          null,
+          { totalChapters: targets.length },
           {
             onDelta: (d) => setWriteText((t) => t + d),
-            onError: (m) => message.error(`第${it.chapterOrder}章：${m}`),
           },
         );
       }
       message.success("正文已全部生成并保存");
       load();
     } catch (e: any) {
-      message.error(e?.message ?? "生成失败");
+      message.error(`第${done} 章生成失败：${e?.message ?? "AI 服务暂时不可用"}`);
     } finally {
       setWriteOpen(false);
       setWritingId(null);
@@ -171,7 +256,7 @@ export default function OutlineTab({ novelId }: { novelId: number }) {
   /** 批量生成前覆盖确认：若任一目标章已有正文则弹窗，否则直接生成 */
   const confirmWriteAll = () => {
     const targets = items.filter((i) => i.hasOutline);
-    if (targets.some((i) => (i.wordCount ?? 0) > 0)) {
+    if (targets.some((i) => i.hasContent)) {
       Modal.confirm({
         title: "覆盖确认",
         content:
@@ -201,25 +286,62 @@ export default function OutlineTab({ novelId }: { novelId: number }) {
           <Button
             type="primary"
             icon={<RobotOutlined />}
-            loading={generating}
-            disabled={items.length === 0}
+            loading={running}
+            disabled={running}
             onClick={generateAll}
           >
             一键生成大纲{missing > 0 ? `（${missing} 章待生成）` : ""}
           </Button>
-          <Button
-            icon={<FileAddOutlined />}
-            disabled={items.length === 0}
-            onClick={() => confirmWriteAll()}
+          <Tooltip
+            title={
+              hasOutlines
+                ? "按已规划的章节大纲批量生成正文"
+                : "请先生成章节大纲：正文需要依据大纲写作，避免跑偏"
+            }
           >
-            一键生成正文
-          </Button>
+            <span>
+              <Button
+                icon={<FileAddOutlined />}
+                disabled={!hasOutlines}
+                onClick={() => confirmWriteAll()}
+              >
+                一键生成正文
+              </Button>
+            </span>
+          </Tooltip>
         </Space>
       </div>
+      {running && task && (
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message={
+            <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <span>
+                正在生成大纲：第 {task.currentIndex} / {task.total || "?"} 章
+                {task.currentTitle ? `《${task.currentTitle}》` : ""}
+                {task.failed > 0 ? `（失败 ${task.failed} 章）` : ""}
+              </span>
+              <Progress
+                percent={
+                  task.total > 0 ? Math.round((task.currentIndex / task.total) * 100) : 0
+                }
+                size="small"
+                style={{ width: 160 }}
+              />
+              <Button size="small" danger onClick={cancelTask}>
+                取消
+              </Button>
+            </div>
+          }
+          description="大纲逐章生成中，可离开本页；每章一次 AI 调用，章数越多耗时越久。"
+        />
+      )}
       {loading ? (
         <Spin />
       ) : items.length === 0 ? (
-        <Empty description="还没有章节，先去“章节”页新建，再来规划大纲" />
+        <Empty description="还没有章节。请先到「章节」页新建章节，再回到这里规划大纲（大纲生成不会自动创建章节）。" />
       ) : (
         <Table
           rowKey="chapterId"
@@ -237,10 +359,15 @@ export default function OutlineTab({ novelId }: { novelId: number }) {
               ),
             },
             {
-              title: "预计字数",
+              title: (
+                <Tooltip title="每章计划字数 = 全书总目标字数 ÷ 章节数，由后端自动计算并用于生成正文">
+                  预计字数
+                </Tooltip>
+              ),
               dataIndex: "wordCount",
               width: 110,
-              render: (w: number) => `${(w ?? 0).toLocaleString()}`,
+              render: (w: number | null) =>
+                w ? `${Math.round(w).toLocaleString()}` : <span className="muted">—</span>,
             },
             {
               title: "大纲（写作前的章节规划，指导正文、避免跑偏）",

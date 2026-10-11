@@ -33,7 +33,7 @@ public class LlmClientProvider {
                 .filter(c -> "openai".equals(c.getProvider()) && !c.getApiKey().isBlank())
                 .<LlmClient>map(c -> new OpenAiCompatClient(c.getBaseUrl(), c.getApiKey(), c.getModel(),
                         aiProperties.getTemperature(), aiProperties.getReadTimeoutSeconds(),
-                        aiProperties.getConnectTimeoutSeconds(), objectMapper))
+                        aiProperties.getConnectTimeoutSeconds(), aiProperties.getMaxOutputTokens(), objectMapper))
                 .orElse(globalClient);
     }
 

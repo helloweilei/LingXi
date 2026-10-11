@@ -48,6 +48,8 @@ lingxi:
     context-budget-chars: 8000
     # 注入的最近章节摘要条数
     max-recent-summaries: 10
+    # 单次生成的最大输出 token：过小会导致长章节被硬截断（写不到收尾）
+    max-output-tokens: 8192
 
 logging:
   level:

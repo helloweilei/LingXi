@@ -21,7 +21,7 @@ export default function Guide() {
   const [mode, setMode] = useState<'guided' | 'seed' | null>(null);
   const [question, setQuestion] = useState<Question | null>(null);
   const [step, setStep] = useState(0);
-  const [total, setTotal] = useState(6);
+  const [total, setTotal] = useState(7);
   const [input, setInput] = useState('');
   const [seedText, setSeedText] = useState('');
   const [generating, setGenerating] = useState(false);
@@ -36,7 +36,6 @@ export default function Guide() {
       setIntentId(r.intentId);
       setMode(r.mode);
       setQuestion(r.firstQuestion ?? null);
-      setTotal(6);
       setStep(0);
       setProposals([]);
     } catch (e: any) {
@@ -99,7 +98,6 @@ export default function Guide() {
       const s: GuideState = await guideApi.get(intentId);
       setProposals(s.proposals ?? []);
       setStep(s.answers ? Object.keys(s.answers).filter((k) => k !== 'seed').length : 0);
-      setTotal(6);
     } catch (e: any) {
       message.error(e?.message ?? '获取方案失败');
     }
@@ -152,7 +150,7 @@ export default function Guide() {
             <Card hoverable onClick={beginGuided} style={{ height: '100%' }}>
               <h3>从零开始（问答引导）</h3>
               <p className="muted">
-                还不确定写什么？回答 6 个关于题材、基调、读者、冲突、篇幅、平台的小问题，AI 帮你策划多套原创方案。
+                还不确定写什么？回答 7 个关于题材、基调、读者、冲突、篇幅、字数、平台的小问题，AI 帮你策划多套原创方案。
               </p>
             </Card>
           </Col>

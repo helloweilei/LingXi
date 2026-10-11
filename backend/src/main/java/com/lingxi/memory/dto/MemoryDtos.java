@@ -30,7 +30,7 @@ public final class MemoryDtos {
                                 LocalDateTime updatedAt) {
     }
 
-    /** 一键/批量生成大纲请求：指定章节则只生成这些，留空则生成全书未生成大纲的章节 */
+    /** 一键/批量生成大纲请求：指定章节则只生成这些，留空则生成全书未生成大纲的章节（不会创建章节） */
     public record GenerateReq(List<Long> chapterIds) {
     }
 

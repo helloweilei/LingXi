@@ -1,7 +1,7 @@
 package com.lingxi.guide;
 
 import com.lingxi.common.ApiResponse;
-import com.lingxi.common.BizException;
+import com.lingxi.common.SseStreams;
 import com.lingxi.guide.dto.GuideDtos;
 import com.lingxi.user.User;
 import org.springframework.http.MediaType;
@@ -16,7 +16,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
 
 @RestController
 @RequestMapping("/api/guide")
@@ -57,7 +56,7 @@ public class IdeaGuideController {
 
     @PostMapping(value = "/{id}/generate", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<String>> generate(@AuthenticationPrincipal User user, @PathVariable Long id) {
-        return toSse(guideService.generate(user, id));
+        return SseStreams.toSse(guideService.generate(user, id));
     }
 
     @PostMapping("/{id}/select")
@@ -78,15 +77,5 @@ public class IdeaGuideController {
     public ApiResponse<Void> reset(@AuthenticationPrincipal User user, @PathVariable Long id) {
         guideService.reset(user, id);
         return ApiResponse.ok();
-    }
-
-    private Flux<ServerSentEvent<String>> toSse(Flux<String> deltas) {
-        return deltas
-                .map(t -> ServerSentEvent.<String>builder(t).event("delta").build())
-                .concatWith(Mono.just(ServerSentEvent.<String>builder("").event("done").build()))
-                .onErrorResume(e -> {
-                    String msg = e instanceof BizException be ? be.getMessage() : "AI 服务暂时不可用，请稍后重试";
-                    return Mono.just(ServerSentEvent.<String>builder(msg).event("error").build());
-                });
     }
 }

@@ -29,7 +29,13 @@ public final class ChapterDtos {
                      String content, LocalDateTime createdAt, LocalDateTime updatedAt) {
     }
 
+    /** 版本快照：含正文，便于前端预览后再决定是否回滚 */
     public record VersionVO(Long id, Integer versionNo, String title, Long wordCount,
-                            String reason, LocalDateTime createdAt) {
+                            String reason, LocalDateTime createdAt, String content) {
+        /** 不含正文的轻量视图（列表展示用） */
+        public VersionVO(Long id, Integer versionNo, String title, Long wordCount,
+                         String reason, LocalDateTime createdAt) {
+            this(id, versionNo, title, wordCount, reason, createdAt, null);
+        }
     }
 }

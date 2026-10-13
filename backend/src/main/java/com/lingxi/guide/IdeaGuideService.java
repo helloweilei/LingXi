@@ -350,9 +350,9 @@ public class IdeaGuideService {
                 str(p, "protagonist", ""), str(p, "outline", ""), chars, worlds, str(p, "platform", ""));
     }
 
-    private static String str(JsonNode n, String k, String def) {
+    private static String str(JsonNode n, String k, String defaultValue) {
         JsonNode v = n.get(k);
-        return v == null ? def : v.asText(def);
+        return v == null ? defaultValue : v.asText(defaultValue);
     }
 
     private static String limit(String s, int max) {

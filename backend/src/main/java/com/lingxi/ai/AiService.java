@@ -17,13 +17,18 @@ import com.lingxi.novel.NovelService;
 import com.lingxi.user.User;
 import com.lingxi.world.WorldSetting;
 import com.lingxi.world.WorldSettingRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
+import java.time.Duration;
 import java.util.List;
 
 @Service
 public class AiService {
+
+    private static final Logger log = LoggerFactory.getLogger(AiService.class);
 
     private static final String SYSTEM_PROMPT = """
             你是「灵犀创作」平台内置的资深中文网文创作助手，文笔扎实、节奏感强，深谙网文爽点与期待感营造。请严格遵守：
@@ -178,21 +183,31 @@ public class AiService {
     }
 
     /**
-     * 自动创作流水线专用：为“待写章节”生成整章正文。
-     * 自动流水线会先建好空章节再调用，因此这里统一按“已有章节、向尾部续写整章”处理。
+     * 生成整章正文（写前规划 → 按本章大纲创作）。
+     *
+     * 语义澄清（重要）：
+     * - 默认（appendExisting=false）：**整章重写**，忽略本章已有正文，从上一章结尾重新开始写。
+     *   「生成正文」按钮走这条——用户点它的意图是"重新生成这一章"，而不是"接着上次继续"。
+     * - appendExisting=true：把本章已有内容的尾部作为上下文，让 AI 从断点**续写**（只增不重）。
+     *   「从当前内容接着写」入口走这条。
      *
      * @param totalChapters 全书总章节数（用于判断本章是否为终章）；为 null 时按已存在章节数推断
      */
-    public Flux<String> writeChapter(Long novelId, Long chapterId, User user, Integer totalChapters) {
+    public Flux<String> writeChapter(Long novelId, Long chapterId, User user, Integer totalChapters,
+                                     boolean appendExisting) {
         Novel novel = novelService.loadOwned(novelId, user);
-        int targetWords = perChapterTargetWords(novel);
+        int targetWords = perChapterTargetWords(novel, chapterId);
         Chapter chapter = loadChapter(novelId, chapterId);
-        String prevTail = chapterRepository
+
+        // 连贯性上下文：上一章的正文尾部 + 上一章大纲 + 前若干章大纲概览
+        Chapter prevChapter = chapterRepository
                 .findFirstByNovelIdAndDeletedFalseAndChapterOrderLessThanOrderByChapterOrderDescIdDesc(
                         novel.getId(), chapter.getChapterOrder())
-                .map(c -> tail(c.getContent(), 800))
-                .orElse("");
-        String currentTail = tail(chapter.getContent(), 1200);
+                .orElse(null);
+        String prevTail = prevChapter == null ? "" : tail(prevChapter.getContent(), PREV_TAIL_CHARS);
+        String prevTitle = prevChapter == null ? null : prevChapter.getTitle();
+        // 仅"续写"模式才带入本章已有内容；重写模式必须忽略它，否则会从旧稿接着写
+        String currentTail = appendExisting ? tail(chapter.getContent(), 1200) : "";
 
         // 全书章节总数：显式传入优先，否则取当前已有章节数
         long total = totalChapters != null && totalChapters > 0
@@ -201,25 +216,43 @@ public class AiService {
         boolean isFinalChapter = total > 0 && chapter.getChapterOrder() >= total;
 
         StringBuilder prompt = new StringBuilder(baseContext(novel));
-        if (!prevTail.isEmpty()) {
-            prompt.append("\n【上一章结尾】\n").append(prevTail).append("\n");
+        if (prevChapter != null) {
+            prompt.append("\n\n【上一章】第").append(prevChapter.getChapterOrder()).append("章");
+            if (prevTitle != null && !prevTitle.isBlank()) {
+                prompt.append("《").append(prevTitle).append("》");
+            }
+            prompt.append("\n");
+            // 上一章大纲：让 AI 知道上一章整体发生了什么，而不只是末尾几百字
+            chapterOutlineRepository.findByChapterId(prevChapter.getId()).ifPresent(o -> {
+                if (!isBlank(o.getOutline())) {
+                    prompt.append("【上一章大纲（上一章完整发生了什么）】\n")
+                            .append(tail(o.getOutline(), 900)).append("\n");
+                }
+            });
+            prompt.append("【上一章结尾原文（务必从这段之后无缝衔接，不要另起炉灶）】\n")
+                    .append(prevTail).append("\n");
+        } else {
+            prompt.append("\n\n（这是全书第一章，没有上一章可承接）");
         }
-        prompt.append("\n【当前章节】第").append(chapter.getChapterOrder())
+        // 前几章大纲概览：维持长线主线与人物状态的一致性
+        appendRecentOutlinesBrief(prompt, novel.getId(), chapter.getChapterOrder());
+
+        prompt.append("\n\n【本章】第").append(chapter.getChapterOrder())
                 .append("章 ").append(chapter.getTitle());
         if (total > 0) {
-            prompt.append("（全书共 ").append(total).append(" 章，本章是第 ")
-                    .append(chapter.getChapterOrder()).append(" 章");
+            prompt.append("（全书共 ").append(total).append(" 章");
             prompt.append(isFinalChapter ? "，且是全书最后一章）" : "）");
         }
         prompt.append("\n");
         if (currentTail.isEmpty()) {
-            prompt.append("（本章尚未动笔，请直接开篇，注意与上一章情节自然衔接）");
+            prompt.append("（本章尚未动笔，请直接开篇）");
         } else {
-            prompt.append("\n【本章已写内容结尾】\n").append(currentTail);
+            prompt.append("\n【本章已写到的内容（请从这段之后接着写，不要重复已写部分）】\n")
+                    .append(currentTail);
         }
         // 注入本章大纲（若存在）：让 AI 严格按规划施工，避免跑偏、收尾失控
         chapterOutlineRepository.findByChapterId(chapter.getId()).ifPresent(o -> {
-            if (o.getOutline() != null && !o.getOutline().isBlank()) {
+            if (!isBlank(o.getOutline())) {
                 prompt.append("\n【本章大纲（请严格据此展开，确保要点全部覆盖、收尾呼应大纲）】\n")
                         .append(o.getOutline()).append("\n");
             }
@@ -228,13 +261,18 @@ public class AiService {
         prompt.append(isFinalChapter ? """
 
                 【任务】这是全书的最后一章，请写出完整正文并收束全书。
+                0. **【最高优先级】开篇必须与上一章结尾无缝衔接**：第一段要从上一章结尾的时点、地点、人物状态直接接续，不要重新开场；
                 1. 本章必须完整收尾：主要矛盾得到交代，主角的处境与心态有明确落点，全书主线与核心悬念给出答案；
                 2. 不要突然结束或草草了事，回顾并呼应前文埋下的伏笔与人物成长；
-                3. 收束不等于仓促最后一页，要让读者感到“故事完整地结束了”，而非“被截断了”。
+                3. 收束不等于仓促最后一页，要让读者感到"故事完整地结束了"，而非"被截断了"。
                 """ : """
 
                 【任务】请写出本章完整正文，要求本章内部形成完整的叙事闭环：
-                1. 开篇承接上文（若已有内容则从当前结尾自然续写），交代本章处境与目标；
+                0. **【最高优先级】开篇必须与上一章结尾无缝衔接**：
+                   - 第一段要从上一章结尾的时点、地点、人物状态直接接续，不要重新开场、不要另起炉灶；
+                   - 承接上一章留下的冲突、悬念或未完成的动作，不得当作新故事另写；
+                   - 人物的位置、情绪、随身物品与上一章结尾保持一致。
+                1. 交代本章处境与目标；
                 2. 中段围绕目标展开冲突、场景与对话，情节要有实质推进；
                 3. 结尾必须交代本章主要矛盾的阶段性结果（解决、失败或转折），使本章情节闭合；
                 4. 在情节闭合之后，可以留一个自然的悬念或期待引向下一章，但不得用“未写完的片段”充当结尾。
@@ -243,6 +281,7 @@ public class AiService {
 
                 【字数】
                 本章不少于 %d 字。请先把情节写完整、写闭合，再考虑字数；宁可略超也不要为了凑字数而仓促收尾或半途断掉。
+                本章必须**一次性写完并写完整**：结尾必须收束完整，绝不能停在半句话或未完成的场景上。
                 """.formatted(targetWords));
         prompt.append("\n只输出正文，不要输出标题、序号、解释或字数说明。");
         return llm(user).stream(AiTaskType.WRITE_CHAPTER, contextOf(novel, chapter.getContent()), SYSTEM_PROMPT, prompt.toString());
@@ -253,18 +292,108 @@ public class AiService {
      * 流式输出正文的同时在 onComplete 时整章覆盖写入：用于“章节大纲→正文”的一键生成。
      * 前端先用 Popconfirm 提示覆盖风险，再调用本接口。
      */
-    public Flux<String> writeChapterAndSave(Long novelId, Long chapterId, User user, Integer totalChapters) {
+    public Flux<String> writeChapterAndSave(Long novelId, Long chapterId, User user, Integer totalChapters,
+                                         boolean appendExisting) {
         Chapter chapter = loadChapter(novelId, chapterId);
+        Novel novel = novelService.loadOwned(novelId, user);
         String title = chapter.getTitle();
         StringBuilder acc = new StringBuilder();
-        return writeChapter(novelId, chapterId, user, totalChapters)
+        return writeChapter(novelId, chapterId, user, totalChapters, appendExisting)
                 .doOnNext(acc::append)
                 .doOnComplete(() -> {
-                    String content = acc.toString().trim();
-                    if (!content.isEmpty()) {
-                        chapterService.save(chapter.getId(), user, new SaveReq(title, content, "ai"));
+                    String generated = acc.toString().trim();
+                    if (generated.isEmpty()) {
+                        return;
                     }
+                    String content = generated;
+                    // 续写模式：把新生成的内容接在原文之后（只增不重）
+                    if (appendExisting && chapter.getContent() != null && !chapter.getContent().isBlank()) {
+                        content = chapter.getContent().stripTrailing() + "\n\n" + generated;
+                    } else {
+                        // 重写模式：仅在因输出上限被截断时自动续写补全
+                        try {
+                            content = completeIfTruncated(novel, user, generated);
+                        } catch (Exception e) {
+                            // 续写失败不阻断：至少保存已生成的部分
+                            log.warn("章节 {} 截断续写失败，保存已生成部分", chapterId);
+                        }
+                    }
+                    chapterService.save(chapter.getId(), user, new SaveReq(title, content, "ai"));
                 });
+    }
+
+    /** 最多自动续写轮数，避免异常情况下无限生成 */
+    private static final int MAX_CONTINUE_ROUNDS = 3;
+    private static final Duration CONTINUE_TIMEOUT = Duration.ofMinutes(5);
+
+    /**
+     * 检测首轮输出是否被 token 上限截断；若是，从断点续写直到情节闭合。
+     * 这样即使单章目标字数较大，也不会出现"写到一半句子断掉"的废稿。
+     * 对外暴露以供自动创作流水线（自行落库，不走 writeChapterAndSave）复用。
+     */
+    public String completeIfTruncated(Novel novel, User user, String content) {
+        String current = content;
+        for (int round = 1; round <= MAX_CONTINUE_ROUNDS; round++) {
+            if (!looksTruncated(current)) {
+                break;
+            }
+            StringBuilder more = new StringBuilder();
+            llm(user).stream(AiTaskType.WRITE_CHAPTER,
+                    contextOf(novel, current),
+                    SYSTEM_PROMPT,
+                    continueChapterPrompt(novel, current, round))
+                    .doOnNext(more::append)
+                    .blockLast(CONTINUE_TIMEOUT);
+            String extra = more.toString().trim();
+            if (extra.isEmpty()) {
+                break;
+            }
+            current = current + extra;
+        }
+        return current;
+    }
+
+    /** 判断内容是否像被硬截断：结尾缺少句末标点，或末段明显过短 */
+    static boolean looksTruncated(String content) {
+        if (content == null || content.isBlank()) {
+            return true;
+        }
+        String trimmed = content.trim();
+        char last = trimmed.charAt(trimmed.length() - 1);
+        boolean endsWithPunctuation = "。！？…”』」）】…!?.".indexOf(last) >= 0;
+        if (!endsWithPunctuation) {
+            return true;
+        }
+        // 末段过短也视为可疑（可能刚好被切在半段）
+        String[] paras = trimmed.split("\\n\\s*\\n");
+        String lastPara = paras[paras.length - 1].trim();
+        return lastPara.length() < 12;
+    }
+
+    /**
+     * 续写提示词：明确"承接上文继续写，不要重复已写内容"。
+     * 注意：Java 文本块中以 + 开头的行会被当作字面量（不是拼接运算符），
+     * 因此这里用 formatted() 一次性拼好，绝不把 + 表达式写进文本块内部。
+     */
+    private String continueChapterPrompt(Novel novel, String existing, int round) {
+        String promptTemplate = """
+
+                【任务】请继续把这一章写完。
+
+                【已写到的内容（结尾）】
+                %s
+
+                【续写要求】
+                1. **直接从上面最后一句之后接着写**，不要重复已写内容、不要另起炉灶、不要重新开头；
+                2. 承接上文的时间、地点、人物状态与正在发生的事；
+                3. 本章尚未收尾：继续推进情节，并把本章主要矛盾给出阶段性结果，使情节完整闭合；
+                4. 结尾必须写完整、写闭合，绝不能停在半句话上；
+                5. 本次续写约 %d 字。
+
+                只输出续写的正文，不要解释、不要标题。
+                """;
+        return baseContext(novel)
+                + promptTemplate.formatted(tail(existing, 1500), 1000 + round * 500);
     }
 
     public Flux<String> expand(Long novelId, String text, User user) {
@@ -340,6 +469,48 @@ public class AiService {
         return llm(user).stream(AiTaskType.CHAPTER_OUTLINE, contextOf(novel, content), SYSTEM_PROMPT, prompt.toString())
                 .doOnNext(acc::append)
                 .doOnComplete(() -> persistOutlineAndTitle(novel, chapter, acc.toString().trim(), user));
+    }
+
+    /**
+     * 错别字/用词校对：把文本中的错别字、别字、形近字误用、明显语病与标点问题列出来。
+     * 输出 JSON 数组（每条含 wrong/suggestion/type/reason），供前端逐条定位与采纳修正。
+     * 长度受实时生成限制，超长文本会截断——长章节建议分段检查。
+     */
+    public Flux<String> proofread(String text, User user) {
+        String src = text == null ? "" : text.trim();
+        if (src.isEmpty()) {
+            return Flux.just("[]");
+        }
+        String prompt = """
+                请校对下面这段中文网络小说文本，找出其中的错误。
+
+                【检查范围】
+                1. 错别字与别字（如同音字、形近字误用）；
+                2. 成语/词语误用（如"迫不急待"→"迫不及待"、"一如继往"→"一如既往"）；
+                3. 明显的语病（搭配不当、成分残缺、句式杂糅等）；
+                4. 标点符号问题（引号不配对、顿号与逗号混用、书名号误用等）；
+                5. 同一段内前后称呼不一致（如先称"他/她"后改用姓名，造成指代混乱）。
+
+                【严格排除——这些不是错误，不要报告】
+                - 合理的口语、方言、语气词与网文常用表达；
+                - 角色名、地名、专有设定（如"异能等级""F级"）等本书自定义名词；
+                - 刻意使用的错别字角色、吐槽体、网络梗；
+                - 任何你不确定是否为错的表达（宁可漏报，不可误报）。
+
+                【输出格式】
+                只输出一个 JSON 数组，每个元素为：
+                {"wrong":"原文中的错误片段","suggestion":"建议改为","type":"错别字|词语误用|语病|标点|称呼不一致","reason":"简短说明"}
+
+                要求：
+                - wrong 必须是原文中**连续出现、逐字一致**的片段（便于定位替换），不得改写或省略；
+                - 若通篇无错，输出空数组 []；
+                - 最多输出 50 条，按出现顺序排列；
+                - 只输出 JSON，不要 Markdown 代码块标记，不要任何解释文字。
+
+                【待校对文本】
+                """ + src;
+        return llm(user).stream(AiTaskType.PROOFREAD,
+                new AiContext("校对", "", java.util.List.of(), src), SYSTEM_PROMPT, prompt);
     }
 
     /**
@@ -476,19 +647,79 @@ public class AiService {
         return sb.toString();
     }
 
+    /** 上一章结尾注入的字符数：越大越连贯，但会挤压本章可用上下文 */
+    private static final int PREV_TAIL_CHARS = 2000;
+    /** 前文大纲概览最多回溯几章 */
+    private static final int RECENT_OUTLINE_CHAPTERS = 3;
+    private static final int RECENT_OUTLINE_CHARS = 260;
+
     /**
-     * 每章目标字数：优先按“总目标字数 / 章节数”动态均摊；作品未设置总目标时退回兜底值。
-     * 这是创作时的唯一字数依据——前端不传、也不让用户手动选择字数。
+     * 注入前若干章的大纲概览（不含本章与上一章）：维持长线主线、人物状态与未回收伏笔的一致性，
+     * 避免"每章像另起炉灶"。按章序倒序收集，再正序输出。
+     */
+    private void appendRecentOutlinesBrief(StringBuilder prompt, Long novelId, int currentOrder) {
+        List<Chapter> recent = chapterRepository
+                .findByNovelIdAndDeletedFalseOrderByChapterOrderAscIdAsc(novelId).stream()
+                .filter(c -> c.getChapterOrder() < currentOrder)
+                .toList();
+        if (recent.isEmpty()) {
+            return;
+        }
+        int fromIndex = Math.max(0, recent.size() - RECENT_OUTLINE_CHAPTERS);
+        StringBuilder sb = new StringBuilder("\n【前文剧情回顾（务必与之一致，不要另起炉灶）】\n");
+        for (int i = fromIndex; i < recent.size(); i++) {
+            Chapter c = recent.get(i);
+            ChapterOutline o = chapterOutlineRepository.findByChapterId(c.getId()).orElse(null);
+            String brief = o != null && !isBlank(o.getOutline()) ? o.getOutline() : null;
+            if (brief == null) {
+                // 无大纲时退化为该章正文尾部，保证至少有"前情"
+                brief = tail(c.getContent(), 160);
+            }
+            if (isBlank(brief)) {
+                continue;
+            }
+            sb.append("第").append(c.getChapterOrder()).append("章：")
+                    .append(tail(brief, RECENT_OUTLINE_CHARS)).append("\n");
+        }
+        if (sb.length() > "\n【前文剧情回顾（务必与之一致，不要另起炉灶）】\n".length()) {
+            prompt.append(sb);
+        }
+    }
+
+    /**
+     * 每章目标字数：按“总目标字数 / 章节数”动态均摊，并**封顶到单次输出能力之内**。
+     *
+     * 关键：LLM 单次生成有 token 上限（max-output-tokens）。若均摊后的每章字数远超该上限，
+     * 模型写到一半就会被硬截断（句子断在半截，前言不搭后语）。因此这里做上限保护，
+     * 并提示用户"总字数/章节数"设置需要调整——总字数除以章节数才是真正的单章篇幅。
      */
     private static final int FALLBACK_CHAPTER_WORDS = 1500;
+    /** 单章目标字数上限：与 max-output-tokens(16384) 对齐，留出余量 */
+    private static final int MAX_CHAPTER_WORDS = 6000;
 
-    private int perChapterTargetWords(Novel novel) {
+    /**
+     * 每章目标字数。优先级：
+     * 1. 用户对本章的单独设定（ChapterOutline.targetWords）；
+     * 2. 全书均摊：ceil(总目标字数 / 章节数)；
+     * 3. 兜底 FALLBACK_CHAPTER_WORDS。
+     * 并封顶到单次输出能力之内——LLM 单次生成有 token 上限，超出会被硬截断（句子断在半截）。
+     */
+    private int perChapterTargetWords(Novel novel, Long chapterId) {
+        if (chapterId != null) {
+            Integer custom = chapterOutlineRepository.findByChapterId(chapterId)
+                    .map(ChapterOutline::getTargetWords)
+                    .orElse(null);
+            if (custom != null && custom > 0) {
+                return Math.min(custom, MAX_CHAPTER_WORDS);
+            }
+        }
         Integer total = novel.getTargetWords();
         long count = chapterRepository.countByNovelIdAndDeletedFalse(novel.getId());
+        int words = FALLBACK_CHAPTER_WORDS;
         if (total != null && total > 0 && count > 0) {
-            return (int) Math.ceil((double) total / count);
+            words = (int) Math.ceil((double) total / count);
         }
-        return FALLBACK_CHAPTER_WORDS;
+        return Math.min(words, MAX_CHAPTER_WORDS);
     }
 
     private Chapter loadChapter(Long novelId, Long chapterId) {

@@ -3,11 +3,9 @@ package com.lingxi.ai;
 import com.lingxi.ai.dto.AiDtos.ChatReq;
 import com.lingxi.ai.dto.AiDtos.TextReq;
 import com.lingxi.common.ApiResponse;
-import com.lingxi.common.BizException;
+import com.lingxi.common.SseStreams;
 import com.lingxi.user.User;
 import jakarta.validation.Valid;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -18,7 +16,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
 
 import java.util.Map;
 
@@ -29,8 +26,6 @@ public class AiController {
     /** 生成整章正文的请求：可选传入全书总章节数，用于判断本章是否为终章（决定是否收束全书） */
     record WriteReq(Integer totalChapters) {
     }
-
-    private static final Logger log = LoggerFactory.getLogger(AiController.class);
 
     private final AiService aiService;
     private final LlmClientProvider llmClientProvider;
@@ -50,32 +45,32 @@ public class AiController {
 
     @PostMapping(value = "/novels/{novelId}/outline", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<String>> outline(@AuthenticationPrincipal User user, @PathVariable Long novelId) {
-        return toSse(aiService.outline(novelId, user));
+        return SseStreams.toSse(aiService.outline(novelId, user));
     }
 
     @PostMapping(value = "/novels/{novelId}/chapters/{chapterId}/continue", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<String>> continueChapter(@AuthenticationPrincipal User user,
                                                          @PathVariable Long novelId,
                                                          @PathVariable Long chapterId) {
-        return toSse(aiService.continueChapter(novelId, chapterId, user));
+        return SseStreams.toSse(aiService.continueChapter(novelId, chapterId, user));
     }
 
     @PostMapping(value = "/novels/{novelId}/polish", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<String>> polish(@AuthenticationPrincipal User user, @PathVariable Long novelId,
                                                 @Valid @RequestBody TextReq req) {
-        return toSse(aiService.polish(novelId, req.text(), user));
+        return SseStreams.toSse(aiService.polish(novelId, req.text(), user));
     }
 
     @PostMapping(value = "/novels/{novelId}/expand", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<String>> expand(@AuthenticationPrincipal User user, @PathVariable Long novelId,
                                                 @Valid @RequestBody TextReq req) {
-        return toSse(aiService.expand(novelId, req.text(), user));
+        return SseStreams.toSse(aiService.expand(novelId, req.text(), user));
     }
 
     @PostMapping(value = "/novels/{novelId}/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<String>> chat(@AuthenticationPrincipal User user, @PathVariable Long novelId,
                                               @Valid @RequestBody ChatReq req) {
-        return toSse(aiService.chat(novelId, req, user));
+        return SseStreams.toSse(aiService.chat(novelId, req, user));
     }
 
     /** 生成章节大纲：流式输出，完成后自动写入该章大纲（chapter_outlines），用于创作前规划 */
@@ -83,7 +78,7 @@ public class AiController {
     public Flux<ServerSentEvent<String>> generateChapterOutline(@AuthenticationPrincipal User user,
                                                                @PathVariable Long novelId,
                                                                @PathVariable Long chapterId) {
-        return toSse(aiService.generateChapterOutline(novelId, chapterId, user));
+        return SseStreams.toSse(aiService.generateChapterOutline(novelId, chapterId, user));
     }
 
     /** 生成封面提示词请求：authorName 可选，作者名会原样写入提示词并禁止 AI 改写 */
@@ -95,7 +90,7 @@ public class AiController {
     public Flux<ServerSentEvent<String>> chapterTitle(@AuthenticationPrincipal User user,
                                                        @PathVariable Long novelId,
                                                        @PathVariable Long chapterId) {
-        return toSse(aiService.chapterTitle(novelId, chapterId, user));
+        return SseStreams.toSse(aiService.chapterTitle(novelId, chapterId, user));
     }
 
     @PostMapping(value = "/novels/{novelId}/cover-prompt", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -103,13 +98,13 @@ public class AiController {
                                                       @PathVariable Long novelId,
                                                       @RequestBody(required = false) CoverReq req) {
         String authorName = req != null ? req.authorName() : null;
-        return toSse(aiService.coverPrompt(novelId, authorName, user));
+        return SseStreams.toSse(aiService.coverPrompt(novelId, authorName, user));
     }
 
     /**
-     * 根据章节大纲生成整章正文：流式输出，并在完成后整章覆盖写入（旧内容由 ChapterService 自动留版本快照）。
-     * 每章目标字数由后端按“总目标字数 / 章节数”动态计算，前端无需也不应传入字数。
-     * 章节已存在正文时，前端应先弹确认提示覆盖风险再调用。
+     * 生成整章正文（**整章重写**）：流式输出，完成后覆盖写入（旧内容自动留版本快照，可回滚）。
+     * 忽略本章已有正文，从上一章结尾重新写起——这是「生成正文」按钮的语义。
+     * 章节已有正文时，前端应先弹确认提示覆盖风险再调用。
      */
     @PostMapping(value = "/novels/{novelId}/chapters/{chapterId}/write", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<String>> writeChapter(@AuthenticationPrincipal User user,
@@ -117,16 +112,34 @@ public class AiController {
                                                       @PathVariable Long chapterId,
                                                       @RequestBody(required = false) WriteReq req) {
         Integer total = req != null ? req.totalChapters() : null;
-        return toSse(aiService.writeChapterAndSave(novelId, chapterId, user, total));
+        return SseStreams.toSse(aiService.writeChapterAndSave(novelId, chapterId, user, total, false));
     }
 
-    private Flux<ServerSentEvent<String>> toSse(Flux<String> deltas) {
-        return deltas.map(t -> ServerSentEvent.<String>builder(t).event("delta").build())
-                .concatWith(Mono.just(ServerSentEvent.<String>builder("").event("done").build()))
-                .onErrorResume(e -> {
-                    String msg = e instanceof BizException be ? be.getMessage() : "AI 服务暂时不可用，请稍后重试";
-                    log.error("AI stream error: {}", e.toString());
-                    return Mono.just(ServerSentEvent.<String>builder(msg).event("error").build());
-                });
+    /**
+     * 从本章当前内容**接着写**（只增不重）：仅在已有正文时可用，结果追加到原文之后。
+     * 这是与「生成正文」不同的独立能力，对应前端「从当前内容接着写」入口。
+     */
+    @PostMapping(value = "/novels/{novelId}/chapters/{chapterId}/write-continue", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<ServerSentEvent<String>> writeChapterContinue(@AuthenticationPrincipal User user,
+                                                              @PathVariable Long novelId,
+                                                              @PathVariable Long chapterId,
+                                                              @RequestBody(required = false) WriteReq req) {
+        Integer total = req != null ? req.totalChapters() : null;
+        return SseStreams.toSse(aiService.writeChapterAndSave(novelId, chapterId, user, total, true));
+    }
+
+    /** 错别字校对请求：text 为待校对文本 */
+    record ProofreadReq(String text) {
+    }
+
+    /**
+     * 错别字/用词校对：流式输出 JSON 数组。
+     * 每条形如 {"wrong":"错误片段","suggestion":"建议","type":"错别字|词语误用|语病|标点|称呼不一致","reason":"说明"}
+     * wrong 为原文中逐字连续的片段，便于前端精确定位替换。
+     */
+    @PostMapping(value = "/proofread", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<ServerSentEvent<String>> proofread(@AuthenticationPrincipal User user,
+                                                   @RequestBody ProofreadReq req) {
+        return SseStreams.toSse(aiService.proofread(req == null ? "" : req.text(), user));
     }
 }

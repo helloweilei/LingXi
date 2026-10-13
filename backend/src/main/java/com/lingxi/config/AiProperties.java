@@ -17,8 +17,8 @@ public class AiProperties {
     private int contextBudgetChars = 8000;
     /** 注入的最近章节摘要条数 */
     private int maxRecentSummaries = 10;
-    /** 单次生成的最大输出 token：过小会导致长章节被硬截断（写不到收尾） */
-    private int maxOutputTokens = 8192;
+    /** 单次生成的最大输出 token：过小会导致长章节被硬截断（句子断在半截） */
+    private int maxOutputTokens = 16384;
 
     public boolean isRealLlm() {
         return "openai".equalsIgnoreCase(provider) && apiKey != null && !apiKey.isBlank();

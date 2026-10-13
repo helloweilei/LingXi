@@ -1,6 +1,7 @@
 package com.lingxi.memory;
 
 import com.lingxi.common.ApiResponse;
+import com.lingxi.memory.dto.MemoryDtos.ChapterWordsReq;
 import com.lingxi.memory.dto.MemoryDtos.GenerateReq;
 import com.lingxi.memory.dto.MemoryDtos.MemoryVO;
 import com.lingxi.memory.dto.MemoryDtos.OutlineItemVO;
@@ -94,11 +95,20 @@ public class MemoryController {
         return ApiResponse.ok();
     }
 
-    /** 手动新增 / 编辑单章大纲 */
+    /** 手动新增 / 编辑单章大纲（targetWords 可选，null 表示沿用全书均摊值） */
     @PutMapping("/api/novels/{novelId}/outlines/{chapterId}")
     public ApiResponse<Void> saveOutline(@AuthenticationPrincipal User user, @PathVariable Long novelId,
                                          @PathVariable Long chapterId, @Valid @RequestBody OutlineReq req) {
-        memoryService.saveOutline(novelId, user, chapterId, req.outline());
+        memoryService.saveOutline(novelId, user, chapterId, req.outline(), req.targetWords());
+        return ApiResponse.ok();
+    }
+
+    /** 单独设置/恢复某章目标字数（不改动大纲内容；words 传 0 或不传即恢复默认均摊） */
+    @PutMapping("/api/novels/{novelId}/outlines/{chapterId}/words")
+    public ApiResponse<Void> saveChapterWords(@AuthenticationPrincipal User user, @PathVariable Long novelId,
+                                              @PathVariable Long chapterId,
+                                              @RequestBody ChapterWordsReq req) {
+        memoryService.saveChapterWords(novelId, user, chapterId, req == null ? null : req.words());
         return ApiResponse.ok();
     }
 

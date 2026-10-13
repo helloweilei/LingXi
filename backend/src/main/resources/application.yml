@@ -48,8 +48,9 @@ lingxi:
     context-budget-chars: 8000
     # 注入的最近章节摘要条数
     max-recent-summaries: 10
-    # 单次生成的最大输出 token：过小会导致长章节被硬截断（写不到收尾）
-    max-output-tokens: 8192
+    # 单次生成的最大输出 token：过小会导致长章节被硬截断（写不到收尾/句子断在半截）。
+    # 中文约 1 字 ≈ 1~1.5 token，8192 约等于 5500~6000 字；章节目标字数不能超过这个量。
+    max-output-tokens: 16384
 
 logging:
   level:

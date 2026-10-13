@@ -5,6 +5,7 @@ import type {
   Chapter,
   ChapterMeta,
   ChapterOutlineItem,
+  ChapterVersion,
   CharacterVO,
   Novel,
   NovelDetail,
@@ -52,6 +53,14 @@ export const chapterApi = {
   save: (id: number, req: { title?: string; content?: string }) => put<Chapter>(`/chapters/${id}`, req),
   remove: (id: number) => del(`/chapters/${id}`),
   removeBatch: (ids: number[]) => post<void>(`/chapters/batch-delete`, { ids }),
+  /** 版本快照列表（按版本号倒序，含正文供预览） */
+  versions: (id: number) => get<ChapterVersion[]>(`/chapters/${id}/versions`),
+  /** 回滚到指定快照（回滚前会自动为当前内容留档，可再回退） */
+  restoreVersion: (id: number, versionId: number) =>
+    post<Chapter>(`/chapters/${id}/versions/${versionId}/restore`, {}),
+  /** 删除指定快照（不影响章节当前内容） */
+  deleteVersion: (id: number, versionId: number) =>
+    del<void>(`/chapters/${id}/versions/${versionId}`),
 };
 
 export const characterApi = {
@@ -98,9 +107,12 @@ export const outlineApi = {
       `/novels/${novelId}/outlines/generate`,
       chapterIds ? { chapterIds } : {}
     ),
-  /** 手动新增 / 编辑单章大纲 */
-  save: (novelId: number, chapterId: number, outline: string) =>
-    put<void>(`/novels/${novelId}/outlines/${chapterId}`, { outline }),
+  /** 手动新增 / 编辑单章大纲；targetWords 不传表示沿用全书均摊值 */
+  save: (novelId: number, chapterId: number, outline: string, targetWords?: number) =>
+    put<void>(`/novels/${novelId}/outlines/${chapterId}`, { outline, targetWords }),
+  /** 单独设置某章目标字数；words 传 0 表示恢复默认（全书均摊） */
+  saveWords: (novelId: number, chapterId: number, words: number | null) =>
+    put<void>(`/novels/${novelId}/outlines/${chapterId}/words`, { words }),
   /** 删除单章大纲 */
   remove: (novelId: number, chapterId: number) =>
     del(`/novels/${novelId}/outlines/${chapterId}`),

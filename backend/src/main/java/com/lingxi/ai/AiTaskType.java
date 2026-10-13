@@ -10,5 +10,6 @@ public enum AiTaskType {
     CHAPTER_OUTLINE,
     GUIDE_PROPOSAL,
     COVER_PROMPT,
-    CHAPTER_TITLE
+    CHAPTER_TITLE,
+    PROOFREAD
 }

@@ -5,8 +5,10 @@ import {
   ArrowLeftOutlined,
   ExpandOutlined,
   HighlightOutlined,
+  HistoryOutlined,
   RobotOutlined,
   SaveOutlined,
+  ScanOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router-dom';
 import dayjs from 'dayjs';
@@ -14,6 +16,8 @@ import { chapterApi, novelApi } from '../api';
 import { streamSse } from '../api/ai';
 import type { Chapter, NovelDetail } from '../api/types';
 import AiDrawer from '../components/AiDrawer';
+import ProofreadPanel from '../components/ProofreadPanel';
+import VersionHistoryModal from '../components/VersionHistoryModal';
 
 type DrawerMode = 'continue' | 'polish' | 'expand';
 
@@ -29,6 +33,8 @@ export default function Editor() {
   const [saveState, setSaveState] = useState('');
   const [drawer, setDrawer] = useState<DrawerMode | null>(null);
   const [selText, setSelText] = useState('');
+  const [proofOpen, setProofOpen] = useState(false);
+  const [versionOpen, setVersionOpen] = useState(false);
 
   const taRef = useRef<HTMLTextAreaElement>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -149,6 +155,15 @@ export default function Editor() {
     setDrawer(mode);
   };
 
+  /** 应用错别字修正：整篇替换内容并触发保存，返回是否成功 */
+  const applyProofreadFix = (next: string) => {
+    setContent(next);
+    latestRef.current = { ...latestRef.current, content: next };
+    dirtyRef.current = true;
+    scheduleSave();
+    return true;
+  };
+
   const drawerTitle = { continue: 'AI 续写', polish: 'AI 润色', expand: 'AI 扩写' }[drawer ?? 'continue'];
   const applyText = { continue: '插入到光标处', polish: '替换所选内容', expand: '替换所选内容' }[
     drawer ?? 'continue'
@@ -181,9 +196,19 @@ export default function Editor() {
           {wordCount.toLocaleString()} 字
         </span>
         <Space size={8}>
+        <Tooltip title="查看历史版本，可预览并回滚">
+            <Button icon={<HistoryOutlined />} onClick={() => setVersionOpen(true)}>
+              版本历史
+            </Button>
+          </Tooltip>
           <Tooltip title="基于全书设定与上下文，从光标处续写">
             <Button type="primary" ghost icon={<RobotOutlined />} onClick={() => openAi('continue')}>
               AI 续写
+            </Button>
+          </Tooltip>
+          <Tooltip title="检查全文的错别字、词语误用与标点问题">
+            <Button icon={<ScanOutlined />} onClick={() => setProofOpen(true)}>
+              错别字检查
             </Button>
           </Tooltip>
           <Button icon={<HighlightOutlined />} onClick={() => openAi('polish')}>
@@ -236,6 +261,28 @@ export default function Editor() {
           }}
         />
       )}
+
+      <ProofreadPanel
+        open={proofOpen}
+        content={content}
+        onClose={() => setProofOpen(false)}
+        onApplyFix={applyProofreadFix}
+      />
+
+      <VersionHistoryModal
+        open={versionOpen}
+        chapter={chapter}
+        onClose={() => setVersionOpen(false)}
+        onRestored={(c) => {
+          // 回滚后同步编辑器内容与保存状态，避免界面与实际内容不一致
+          setChapter(c);
+          setTitle(c.title);
+          setContent(c.content ?? '');
+          latestRef.current = { title: c.title, content: c.content ?? '' };
+          dirtyRef.current = false;
+          setSaveState(`已回滚 ${dayjs().format('HH:mm:ss')}`);
+        }}
+      />
     </div>
   );
 }

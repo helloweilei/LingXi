@@ -71,10 +71,18 @@ public class ChapterController {
         return ApiResponse.ok();
     }
 
-    /** 章节版本历史（不含正文内容，恢复时按版本号回滚） */
+    /** 章节版本历史（含快照正文，供前端预览后回滚） */
     @GetMapping("/api/chapters/{id}/versions")
     public ApiResponse<List<VersionVO>> versions(@AuthenticationPrincipal User user, @PathVariable Long id) {
         return ApiResponse.ok(chapterService.versions(id, user));
+    }
+
+    /** 删除指定版本快照（不影响章节当前内容） */
+    @DeleteMapping("/api/chapters/{id}/versions/{versionId}")
+    public ApiResponse<Void> deleteVersion(@AuthenticationPrincipal User user, @PathVariable Long id,
+                                          @PathVariable Long versionId) {
+        chapterService.deleteVersion(id, versionId, user);
+        return ApiResponse.ok();
     }
 
     /** 用指定快照恢复章节内容（恢复前自动留档当前状态） */

@@ -82,15 +82,18 @@ public class MemoryService {
         List<ChapterOutline> outs = chapterOutlineRepository.findByNovelIdOrdered(novelId);
         Map<Long, ChapterOutline> byChapter = outs.stream()
                 .collect(Collectors.toMap(ChapterOutline::getChapterId, o -> o, (a, b) -> a));
-        // 每章计划字数 = ceil(总目标字数 / 章节数)；作品未设置总目标时返回 null（前端显示“—”）
+        // 默认每章字数 = ceil(总目标字数 / 章节数)；未设总目标时为 null（前端显示"—"）
         long chapterCount = chapters.size();
         Integer totalTarget = novel.getTargetWords();
-        Long planPerChapter = (chapterCount > 0 && totalTarget != null && totalTarget > 0)
+        Long defaultPerChapter = (chapterCount > 0 && totalTarget != null && totalTarget > 0)
                 ? (long) Math.ceil((double) totalTarget / chapterCount) : null;
         return chapters.stream().map(c -> {
             ChapterOutline o = byChapter.get(c.getId());
             boolean written = c.getWordCount() != null && c.getWordCount() > 0;
-            return new OutlineItemVO(c.getId(), c.getChapterOrder(), c.getTitle(), planPerChapter, written,
+            // 单章设定优先：用户可为个别章节单独指定目标字数
+            boolean customized = o != null && o.getTargetWords() != null && o.getTargetWords() > 0;
+            Long words = customized ? o.getTargetWords().longValue() : defaultPerChapter;
+            return new OutlineItemVO(c.getId(), c.getChapterOrder(), c.getTitle(), words, customized, written,
                     o != null, o == null ? null : o.getOutline(), o == null ? null : o.getUpdatedAt());
         }).toList();
     }
@@ -143,7 +146,7 @@ public class MemoryService {
 
     /** 手动新增 / 覆盖编辑单章大纲（chapter_id 唯一，自动 upsert） */
     @Transactional
-    public void saveOutline(Long novelId, User user, Long chapterId, String outline) {
+    public void saveOutline(Long novelId, User user, Long chapterId, String outline, Integer targetWords) {
         novelService.loadOwned(novelId, user);
         Chapter chapter = chapterRepository.findById(chapterId)
                 .filter(c -> c.getNovelId().equals(novelId) && !c.isDeleted())
@@ -155,10 +158,35 @@ public class MemoryService {
             return co;
         });
         o.setOutline(outline);
+        // targetWords 为 null 时保持原值（大纲编辑不涉及字数时不应清掉已设定的单章字数）
+        if (targetWords != null) {
+            o.setTargetWords(targetWords > 0 ? targetWords : null);
+        }
         chapterOutlineRepository.save(o);
     }
 
-    /** 删除单章大纲 */
+    /**
+     * 单独设置/清除某一章的目标字数（不触碰大纲内容）。
+     * words 传 null 或 &lt;=0 表示"恢复默认"（沿用全书均摊）。
+     */
+    @Transactional
+    public void saveChapterWords(Long novelId, User user, Long chapterId, Integer words) {
+        Chapter chapter = chapterRepository.findById(chapterId)
+                .filter(c -> c.getNovelId().equals(novelId) && !c.isDeleted())
+                .orElseThrow(() -> new BizException(404, "章节不存在", 404));
+        ChapterOutline o = chapterOutlineRepository.findByChapterId(chapterId).orElseGet(() -> {
+            ChapterOutline co = new ChapterOutline();
+            co.setNovelId(novelId);
+            co.setChapterId(chapterId);
+            // 该表 outline 列为非空，先占位以满足约束；字数设定不需要大纲内容
+            co.setOutline("");
+            return co;
+        });
+        o.setTargetWords(words != null && words > 0 ? words : null);
+        chapterOutlineRepository.save(o);
+    }
+
+    /** 删除单章大纲（连带清除该章设定的目标字数） */
     @Transactional
     public void deleteOutline(Long novelId, User user, Long chapterId) {
         novelService.loadOwned(novelId, user);

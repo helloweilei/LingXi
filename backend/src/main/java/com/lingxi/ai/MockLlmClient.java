@@ -31,6 +31,7 @@ public class MockLlmClient implements LlmClient {
             case GUIDE_PROPOSAL -> guideProposals(ctx);
             case COVER_PROMPT -> coverPrompt(ctx, userPrompt);
             case CHAPTER_TITLE -> chapterTitle(ctx);
+            case PROOFREAD -> proofread(ctx);
         };
         List<String> chunks = new ArrayList<>();
         int i = 0;
@@ -249,6 +250,25 @@ public class MockLlmClient implements LlmClient {
         String lead = (ctx.characterNames() == null || ctx.characterNames().isEmpty())
                 ? "主角" : ctx.characterNames().get(0);
         return String.format("%s雨夜里的那封信", lead);
+    }
+
+    /** 校对：内置示例引擎仅对确实出现的典型错词给示范结果，避免凭空误报 */
+    private String proofread(AiContext ctx) {
+        String src = blank(ctx.sourceText()) ? "" : ctx.sourceText();
+        List<String> found = new ArrayList<>();
+        if (src.contains("迫不急待")) {
+            found.add("{\"wrong\":\"迫不急待\",\"suggestion\":\"迫不及待\",\"type\":\"词语误用\",\"reason\":\"应为「迫不及待」\"}");
+        }
+        if (src.contains("一如继往")) {
+            found.add("{\"wrong\":\"一如继往\",\"suggestion\":\"一如既往\",\"type\":\"词语误用\",\"reason\":\"应为「一如既往」\"}");
+        }
+        if (src.contains("谈笑风声")) {
+            found.add("{\"wrong\":\"谈笑风声\",\"suggestion\":\"谈笑风生\",\"type\":\"错别字\",\"reason\":\"应为「谈笑风生」\"}");
+        }
+        if (src.contains("迫不急待的") && !src.contains("迫不急待\"")) {
+            found.add("{\"wrong\":\"急\",\"suggestion\":\"及\",\"type\":\"错别字\",\"reason\":\"「迫不及待」的「及」误写为「急」\"}");
+        }
+        return "[" + String.join(",", found) + "]";
     }
 
     private String guideProposals(AiContext ctx) {

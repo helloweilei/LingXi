@@ -164,9 +164,23 @@ export default function NovelDetail() {
         items={[
           {
             key: "chapters",
-            label: "章节",
+            label: "章节内容",
             children: (
               <NovelChaptersTab novelId={novelId} refreshKey={chapterRefresh} />
+            ),
+          },
+          {
+            key: "outlines",
+            label: "章节大纲",
+            children: (
+              <NovelOutlinesTab
+                novelId={novelId}
+                onChanged={() => {
+                  // 正文生成后同步刷新作品字数统计与章节列表
+                  load();
+                  setChapterRefresh((k) => k + 1);
+                }}
+              />
             ),
           },
           {
@@ -190,11 +204,6 @@ export default function NovelDetail() {
                 onGenerate={() => setOutlineOpen(true)}
               />
             ),
-          },
-          {
-            key: "outlines",
-            label: "章节大纲",
-            children: <NovelOutlinesTab novelId={novelId} />,
           },
           {
             key: "chat",

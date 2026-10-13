@@ -5,6 +5,7 @@ import {
   Dropdown,
   Empty,
   Input,
+  InputNumber,
   Modal,
   Progress,
   Space,
@@ -14,14 +15,27 @@ import {
   Typography,
   message,
 } from "antd";
-import { DeleteOutlined, EditOutlined, FileAddOutlined, RobotOutlined } from "@ant-design/icons";
+import {
+  DeleteOutlined,
+  EditOutlined,
+  FileAddOutlined,
+  RobotOutlined,
+  RollbackOutlined,
+} from "@ant-design/icons";
 import { outlineApi, outlineTaskApi } from "../api";
 import { streamSse } from "../api/ai";
 import type { ChapterOutlineItem, OutlineTaskVO } from "../api/types";
 
 const { Paragraph } = Typography;
 
-export default function OutlineTab({ novelId }: { novelId: number }) {
+export default function OutlineTab({
+  novelId,
+  onChanged,
+}: {
+  novelId: number;
+  /** 正文/章节数据变化后通知父组件刷新字数统计与章节列表 */
+  onChanged?: () => void;
+}) {
   const [items, setItems] = useState<ChapterOutlineItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [editOpen, setEditOpen] = useState(false);
@@ -34,6 +48,10 @@ export default function OutlineTab({ novelId }: { novelId: number }) {
   const [writingId, setWritingId] = useState<number | null>(null);
   const [task, setTask] = useState<OutlineTaskVO | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // 本章目标字数编辑
+  const [editingWordsId, setEditingWordsId] = useState<number | null>(null);
+  const [editingWords, setEditingWords] = useState<number>(0);
+  const [savingWords, setSavingWords] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -70,6 +88,8 @@ export default function OutlineTab({ novelId }: { novelId: number }) {
         if (!["QUEUED", "RUNNING"].includes(t.status)) {
           stopPolling();
           load();
+          // 大纲生成可能同时替换了占位章节名，需通知父组件刷新章节列表
+          onChanged?.();
           if (t.status === "DONE") {
             message.success(
               `大纲生成完成：成功 ${t.succeeded} 章${t.failed > 0 ? `，失败 ${t.failed} 章` : ""}`,
@@ -85,7 +105,7 @@ export default function OutlineTab({ novelId }: { novelId: number }) {
         message.error(e?.message ?? "查询进度失败");
       }
     },
-    [load]
+    [load, onChanged]
   );
 
   /** 提交异步任务：后台逐章生成，不阻塞页面（仅对已存在的章节生成，不创建章节） */
@@ -133,6 +153,8 @@ export default function OutlineTab({ novelId }: { novelId: number }) {
     try {
       setItems(await outlineApi.generate(novelId, [chapterId]));
       message.success("大纲已生成");
+      // 单章生成大纲同样会产出有意义的章节名，通知父组件刷新
+      onChanged?.();
     } catch (e: any) {
       message.error(e?.message ?? "生成失败");
     }
@@ -165,6 +187,42 @@ export default function OutlineTab({ novelId }: { novelId: number }) {
     }
   };
 
+  /** 开始编辑本章目标字数：默认填当前生效值，未设置过则填全书均摊值 */
+  const startEditWords = (item: ChapterOutlineItem) => {
+    setEditingWordsId(item.chapterId);
+    setEditingWords(item.wordCount ?? 3000);
+  };
+
+  /** 保存本章目标字数（独立于大纲，可只改字数不动大纲） */
+  const commitWords = async (chapterId: number) => {
+    if (!editingWords || editingWords < 100) {
+      message.warning("请输入不小于 100 的字数");
+      return;
+    }
+    setSavingWords(true);
+    try {
+      await outlineApi.saveWords(novelId, chapterId, editingWords);
+      message.success("本章目标字数已更新");
+      setEditingWordsId(null);
+      load();
+    } catch (e: any) {
+      message.error(e?.message ?? "保存失败");
+    } finally {
+      setSavingWords(false);
+    }
+  };
+
+  /** 恢复为全书均摊值 */
+  const resetWords = async (chapterId: number) => {
+    try {
+      await outlineApi.saveWords(novelId, chapterId, 0);
+      message.success("已恢复为全书均摊值");
+      load();
+    } catch (e: any) {
+      message.error(e?.message ?? "恢复失败");
+    }
+  };
+
   const remove = async (chapterId: number) => {
     try {
       await outlineApi.remove(novelId, chapterId);
@@ -175,24 +233,34 @@ export default function OutlineTab({ novelId }: { novelId: number }) {
     }
   };
 
-  /** 根据章节大纲生成整章正文：流式输出并落库（覆盖旧正文，ChapterService 自动留版本快照） */
-  const writeOne = async (item: ChapterOutlineItem) => {
+  /**
+   * 生成整章正文：流式输出并落库。
+   * - append=false（默认）：**整章重写**，忽略已有正文，从上一章结尾重新写
+   * - append=true：从本章当前内容末尾**接着写**（只增不重）
+   * 两种模式都会留版本快照，可回滚。
+   */
+  const writeOne = async (item: ChapterOutlineItem, append = false) => {
     setWriteOpen(true);
     setWriteTitle(
-      `AI 生成正文 · 第${item.chapterOrder}章《${item.chapterTitle}》`,
+      append
+        ? `AI 接着写 · 第${item.chapterOrder}章《${item.chapterTitle}》`
+        : `AI 生成正文 · 第${item.chapterOrder}章《${item.chapterTitle}》`,
     );
     setWriteText("");
     setWritingId(item.chapterId);
     try {
       await streamSse(
-        `/api/ai/novels/${novelId}/chapters/${item.chapterId}/write`,
+        `/api/ai/novels/${novelId}/chapters/${item.chapterId}/${
+          append ? "write-continue" : "write"
+        }`,
         { totalChapters: items.length },
         {
           onDelta: (d) => setWriteText((t) => t + d),
         },
       );
-      message.success("正文已生成并保存");
+      message.success(append ? "已接着写完并保存" : "正文已生成并保存");
       load();
+      onChanged?.();
     } catch (e: any) {
       message.error(e?.message ?? "生成失败");
     } finally {
@@ -201,16 +269,31 @@ export default function OutlineTab({ novelId }: { novelId: number }) {
     }
   };
 
-  /** 生成前覆盖确认：章节已有正文时弹窗提示，否则直接生成 */
+  /** 从当前内容接着写（追加，不覆盖）：仅在已有正文时可用 */
+  const continueWrite = (item: ChapterOutlineItem) => {
+    if (!item.hasContent) {
+      message.info("本章还没有正文，直接用「生成正文」写一整章即可");
+      return;
+    }
+    writeOne(item, true);
+  };
+
+  /** 生成前覆盖确认：章节已有正文时弹窗提示（说明是整章重写），否则直接生成 */
   const confirmWrite = (item: ChapterOutlineItem) => {
     if (item.hasContent) {
-      Modal.confirm({
+      const inst = Modal.confirm({
         title: "覆盖确认",
         content:
-          "该章已有正文，生成将覆盖旧内容（已自动留版本快照，可回滚）。确定继续？",
-        okText: "覆盖生成",
+          "将基于本章大纲**整章重写**（忽略当前正文，从上一章结尾重新写）。旧内容会自动留版本快照，可回滚；也可以取消后用「更多 → 从当前内容接着写」在原文后追加。确定继续？",
+        okText: "整章重写",
+        cancelText: "取消",
         okButtonProps: { danger: true },
-        onOk: () => writeOne(item),
+        maskClosable: true,
+        onOk: () => {
+          // 确认后立即关闭提示，避免与正文生成弹窗叠加
+          inst.destroy();
+          writeOne(item);
+        },
       });
     } else {
       writeOne(item);
@@ -245,6 +328,7 @@ export default function OutlineTab({ novelId }: { novelId: number }) {
       }
       message.success("正文已全部生成并保存");
       load();
+      onChanged?.();
     } catch (e: any) {
       message.error(`第${done} 章生成失败：${e?.message ?? "AI 服务暂时不可用"}`);
     } finally {
@@ -257,13 +341,19 @@ export default function OutlineTab({ novelId }: { novelId: number }) {
   const confirmWriteAll = () => {
     const targets = items.filter((i) => i.hasOutline);
     if (targets.some((i) => i.hasContent)) {
-      Modal.confirm({
+      const inst = Modal.confirm({
         title: "覆盖确认",
         content:
           "将为全部已规划大纲的章节生成正文；若某章已有正文，将被覆盖（已自动留版本快照，可回滚）。确定继续？",
         okText: "生成正文",
+        cancelText: "取消",
         okButtonProps: { danger: true },
-        onOk: () => writeAll(),
+        maskClosable: true,
+        onOk: () => {
+          // 确认后立即关闭提示，避免与正文生成弹窗叠加
+          inst.destroy();
+          void writeAll();
+        },
       });
     } else {
       writeAll();
@@ -295,7 +385,7 @@ export default function OutlineTab({ novelId }: { novelId: number }) {
           <Tooltip
             title={
               hasOutlines
-                ? "按已规划的章节大纲批量生成正文"
+                ? "按已规划的章节大纲，为每章重新生成整章正文（已有正文会被重写，旧内容可回滚）"
                 : "请先生成章节大纲：正文需要依据大纲写作，避免跑偏"
             }
           >
@@ -360,14 +450,68 @@ export default function OutlineTab({ novelId }: { novelId: number }) {
             },
             {
               title: (
-                <Tooltip title="每章计划字数 = 全书总目标字数 ÷ 章节数，由后端自动计算并用于生成正文">
+                <Tooltip title="点击可修改本章目标字数；默认 = 全书总目标字数 ÷ 章节数">
                   预计字数
                 </Tooltip>
               ),
               dataIndex: "wordCount",
-              width: 110,
-              render: (w: number | null) =>
-                w ? `${Math.round(w).toLocaleString()}` : <span className="muted">—</span>,
+              width: 130,
+              render: (w: number | null, r: ChapterOutlineItem) => {
+                if (editingWordsId === r.chapterId) {
+                  return (
+                    <Space.Compact size="small">
+                      <InputNumber
+                        size="small"
+                        min={100}
+                        max={20000}
+                        step={100}
+                        value={editingWords}
+                        autoFocus
+                        style={{ width: 86 }}
+                        onChange={(v) => setEditingWords(Number(v) || 0)}
+                        onPressEnter={() => commitWords(r.chapterId)}
+                      />
+                      <Button
+                        size="small"
+                        type="primary"
+                        loading={savingWords}
+                        onClick={() => commitWords(r.chapterId)}
+                      >
+                        保存
+                      </Button>
+                      <Button size="small" onClick={() => setEditingWordsId(null)}>
+                        取消
+                      </Button>
+                    </Space.Compact>
+                  );
+                }
+                if (!w) {
+                  return (
+                    <a onClick={() => startEditWords(r)}>
+                      <span className="muted">—</span>
+                    </a>
+                  );
+                }
+                return (
+                  <Space size={4}>
+                    <Tooltip title={r.wordCountCustomized ? "本章单独设定，点击可修改" : "沿用全书均摊，点击可单独设定"}>
+                      <a onClick={() => startEditWords(r)}>
+                        {Math.round(w).toLocaleString()}
+                      </a>
+                    </Tooltip>
+                    {r.wordCountCustomized && (
+                      <Tooltip title="恢复为全书均摊值">
+                        <Button
+                          type="link"
+                          size="small"
+                          icon={<RollbackOutlined />}
+                          onClick={() => resetWords(r.chapterId)}
+                        />
+                      </Tooltip>
+                    )}
+                  </Space>
+                );
+              },
             },
             {
               title: "大纲（写作前的章节规划，指导正文、避免跑偏）",
@@ -411,9 +555,21 @@ export default function OutlineTab({ novelId }: { novelId: number }) {
                         items: [
                           {
                             key: "write",
-                            label: "生成正文",
+                            label: r.hasContent ? "整章重写" : "生成正文",
                             icon: <FileAddOutlined />,
                             danger: false,
+                          },
+                          {
+                            key: "append",
+                            label: "从当前内容接着写",
+                            icon: <EditOutlined />,
+                            danger: false,
+                            // 没有正文时「接着写」无意义
+                            disabled: !r.hasContent,
+                          },
+                          {
+                            key: "divider",
+                            type: "divider" as const,
                           },
                           {
                             key: "delete",
@@ -432,6 +588,8 @@ export default function OutlineTab({ novelId }: { novelId: number }) {
                             });
                           } else if (key === "write") {
                             confirmWrite(r);
+                          } else if (key === "append") {
+                            continueWrite(r);
                           }
                         },
                       }}

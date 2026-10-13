@@ -73,8 +73,10 @@ export interface ChapterOutlineItem {
   chapterId: number;
   chapterOrder: number;
   chapterTitle: string;
-  /** 每章计划字数 = 总目标字数 / 章节数（后端动态计算） */
+  /** 本章生效的目标字数（单章设定优先，否则全书均摊） */
   wordCount: number | null;
+  /** 是否为本章单独设定（false 表示沿用全书均摊，可一键恢复默认） */
+  wordCountCustomized: boolean;
   /** 该章是否已写正文（用于覆盖生成前的提示） */
   hasContent: boolean;
   hasOutline: boolean;
@@ -95,6 +97,18 @@ export interface OutlineTaskVO {
   error: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ChapterVersion {
+  id: number;
+  versionNo: number;
+  title: string;
+  wordCount: number;
+  /** 快照来源：save（手动保存）/ ai（AI 写入）/ restore（回滚前留档） */
+  reason: string | null;
+  createdAt: string;
+  /** 快照正文，用于回滚前预览 */
+  content: string | null;
 }
 
 export interface AiConfigVO {

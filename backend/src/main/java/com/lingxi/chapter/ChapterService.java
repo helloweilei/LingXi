@@ -138,6 +138,21 @@ public class ChapterService {
                 .stream().map(ChapterService::toVersionVO).toList();
     }
 
+    /**
+     * 删除单个版本快照（不影响章节当前内容）。
+     * 用于清理无用的历史档；删除后仍可通过其他快照回滚。
+     */
+    @Transactional
+    public void deleteVersion(Long chapterId, Long versionId, User user) {
+        Chapter chapter = loadOwned(chapterId, user);
+        ChapterVersion version = versionRepository.findById(versionId)
+                .orElseThrow(() -> new BizException(404, "版本快照不存在", 404));
+        if (!version.getChapterId().equals(chapter.getId())) {
+            throw new BizException(404, "版本快照不存在", 404);
+        }
+        versionRepository.delete(version);
+    }
+
     /** 用指定快照覆盖章节（恢复前自动留档当前状态，保证可再回滚） */
     @Transactional
     public VO restoreVersion(Long chapterId, Long versionId, User user) {
@@ -222,6 +237,6 @@ public class ChapterService {
 
     private static VersionVO toVersionVO(ChapterVersion v) {
         return new VersionVO(v.getId(), v.getVersionNo(), v.getTitle(), v.getWordCount(),
-                v.getReason(), v.getCreatedAt());
+                v.getReason(), v.getCreatedAt(), v.getContent());
     }
 }

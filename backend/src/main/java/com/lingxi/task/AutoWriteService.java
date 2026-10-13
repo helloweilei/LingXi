@@ -228,11 +228,13 @@ public class AutoWriteService {
                         log.warn("Auto write novel {} chapter {} returned blank content, retry {}/3",
                                 novel.getId(), next, attempt);
                     }
-                    content = collect(aiService.writeChapter(novel.getId(), chapterId, user, p.chapters));
+                    content = collect(aiService.writeChapter(novel.getId(), chapterId, user, p.chapters, false));
                 }
                 if (content.isBlank()) {
                     throw new BizException(502, "AI 未生成正文（第 " + next + " 章）", 502);
                 }
+                // 若因单次输出上限被截断（末尾半句话），自动续写补全，避免产出废稿
+                content = aiService.completeIfTruncated(novel, user, content);
                 String title = "第" + chapterOrder + " 章";
                 chapterService.save(chapterId, user, new SaveReq(title, content, "ai"));
 

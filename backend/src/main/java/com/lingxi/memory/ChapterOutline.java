@@ -35,6 +35,10 @@ public class ChapterOutline {
     @Column(name = "outline", nullable = false)
     private String outline;
 
+    /** 本章目标字数（可按章覆盖全书均摊值）；NULL 表示沿用「总目标字数 / 章节数」 */
+    @Column(name = "target_words")
+    private Integer targetWords;
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
@@ -78,6 +82,14 @@ public class ChapterOutline {
 
     public void setOutline(String outline) {
         this.outline = outline;
+    }
+
+    public Integer getTargetWords() {
+        return targetWords;
+    }
+
+    public void setTargetWords(Integer targetWords) {
+        this.targetWords = targetWords;
     }
 
     public LocalDateTime getCreatedAt() {

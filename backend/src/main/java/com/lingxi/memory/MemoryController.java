@@ -2,6 +2,7 @@ package com.lingxi.memory;
 
 import com.lingxi.common.ApiResponse;
 import com.lingxi.memory.dto.MemoryDtos.ChapterWordsReq;
+import com.lingxi.memory.dto.MemoryDtos.CreateOutlineReq;
 import com.lingxi.memory.dto.MemoryDtos.GenerateReq;
 import com.lingxi.memory.dto.MemoryDtos.MemoryVO;
 import com.lingxi.memory.dto.MemoryDtos.OutlineItemVO;
@@ -46,23 +47,37 @@ public class MemoryController {
         return ApiResponse.ok(memoryService.saveStoryBrain(novelId, user, req.storyBrain()));
     }
 
-    /** 章节大纲列表：每个章节一行，标注是否已生成大纲 */
+    /** 章节大纲列表：一行 = 一条规划（章节是该规划的产物，可能尚不存在） */
     @GetMapping("/api/novels/{novelId}/outlines")
     public ApiResponse<List<OutlineItemVO>> outlines(@AuthenticationPrincipal User user, @PathVariable Long novelId) {
         return ApiResponse.ok(memoryService.outlines(novelId, user));
     }
 
-    /** 一键 / 批量生成大纲（body 可指定 chapterIds，留空则生成全书未生成大纲的章节；不会创建章节） */
+    /**
+     * 手动新增一行章节大纲（只建规划，不创建章节）。
+     * 章节会在用户点「生成正文」时，才由这条规划落地产生。
+     */
+    @PostMapping("/api/novels/{novelId}/outlines")
+    public ApiResponse<List<OutlineItemVO>> createOutline(@AuthenticationPrincipal User user,
+                                                          @PathVariable Long novelId,
+                                                          @RequestBody(required = false) CreateOutlineReq req) {
+        return ApiResponse.ok(memoryService.createOutline(novelId, user,
+                req == null ? null : req.chapterTitle(),
+                req == null ? null : req.outline(),
+                req == null ? null : req.targetWords()));
+    }
+
+    /** 同步批量生成大纲内容（仅适合少量；批量请用 outline-tasks 异步接口） */
     @PostMapping("/api/novels/{novelId}/outlines/generate")
     public ApiResponse<List<OutlineItemVO>> generate(@AuthenticationPrincipal User user, @PathVariable Long novelId,
                                                      @RequestBody(required = false) GenerateReq req) {
-        List<Long> ids = req == null ? null : req.chapterIds();
+        List<Long> ids = req == null ? null : req.outlineIds();
         return ApiResponse.ok(memoryService.generate(novelId, user, ids));
     }
 
     /**
-     * 提交大纲批量生成任务（推荐）：后台线程池逐章生成，避免同步串行调用 LLM 触发 HTTP 超时。
-     * 仅对已存在的章节生成大纲，不会创建章节。
+     * 提交大纲批量生成任务（推荐）：后台线程池逐条生成，避免同步串行调用 LLM 触发 HTTP 超时。
+     * 仅对已存在的规划行生成内容，不会创建规划或章节。
      */
     @PostMapping("/api/novels/{novelId}/outline-tasks")
     public ApiResponse<TaskVO> startOutlineTask(@AuthenticationPrincipal User user, @PathVariable Long novelId,
@@ -95,28 +110,31 @@ public class MemoryController {
         return ApiResponse.ok();
     }
 
-    /** 手动新增 / 编辑单章大纲（targetWords 可选，null 表示沿用全书均摊值） */
-    @PutMapping("/api/novels/{novelId}/outlines/{chapterId}")
+    /** 手动新增 / 编辑一条大纲规划（chapterTitle、outline、targetWords 传 null 表示不改该字段） */
+    @PutMapping("/api/novels/{novelId}/outlines/{outlineId}")
     public ApiResponse<Void> saveOutline(@AuthenticationPrincipal User user, @PathVariable Long novelId,
-                                         @PathVariable Long chapterId, @Valid @RequestBody OutlineReq req) {
-        memoryService.saveOutline(novelId, user, chapterId, req.outline(), req.targetWords());
+                                         @PathVariable Long outlineId, @RequestBody(required = false) OutlineReq req) {
+        memoryService.saveOutline(novelId, user, outlineId,
+                req == null ? null : req.chapterTitle(),
+                req == null ? null : req.outline(),
+                req == null ? null : req.targetWords());
         return ApiResponse.ok();
     }
 
-    /** 单独设置/恢复某章目标字数（不改动大纲内容；words 传 0 或不传即恢复默认均摊） */
-    @PutMapping("/api/novels/{novelId}/outlines/{chapterId}/words")
+    /** 单独设置/恢复某条规划的目标字数（不改动大纲内容；words 传 0 或不传即恢复默认均摊） */
+    @PutMapping("/api/novels/{novelId}/outlines/{outlineId}/words")
     public ApiResponse<Void> saveChapterWords(@AuthenticationPrincipal User user, @PathVariable Long novelId,
-                                              @PathVariable Long chapterId,
-                                              @RequestBody ChapterWordsReq req) {
-        memoryService.saveChapterWords(novelId, user, chapterId, req == null ? null : req.words());
+                                              @PathVariable Long outlineId,
+                                              @RequestBody(required = false) ChapterWordsReq req) {
+        memoryService.saveChapterWords(novelId, user, outlineId, req == null ? null : req.words());
         return ApiResponse.ok();
     }
 
-    /** 删除单章大纲 */
-    @DeleteMapping("/api/novels/{novelId}/outlines/{chapterId}")
+    /** 删除一条大纲规划 */
+    @DeleteMapping("/api/novels/{novelId}/outlines/{outlineId}")
     public ApiResponse<Void> deleteOutline(@AuthenticationPrincipal User user, @PathVariable Long novelId,
-                                           @PathVariable Long chapterId) {
-        memoryService.deleteOutline(novelId, user, chapterId);
+                                           @PathVariable Long outlineId) {
+        memoryService.deleteOutline(novelId, user, outlineId);
         return ApiResponse.ok();
     }
 }

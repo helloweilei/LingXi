@@ -72,6 +72,23 @@ public class ChapterService {
         return toVO(chapter);
     }
 
+    /**
+     * 按**指定序号**创建章节：用于「章节由大纲落地」的场景。
+     * 章节序号由大纲规划决定，因此不能沿用「当前最大序号+1」。
+     */
+    @Transactional
+    public VO createAtOrder(Long novelId, User user, int chapterOrder, String title) {
+        Novel novel = novelService.loadOwned(novelId, user);
+        Chapter chapter = new Chapter();
+        chapter.setNovelId(novel.getId());
+        chapter.setTitle(defaultTitle(title));
+        chapter.setContent("");
+        chapter.setChapterOrder(Math.max(1, chapterOrder));
+        chapter.setWordCount(0L);
+        chapterRepository.save(chapter);
+        return toVO(chapter);
+    }
+
     @Transactional
     public VO save(Long chapterId, User user, SaveReq req) {
         Chapter chapter = loadOwned(chapterId, user);

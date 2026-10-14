@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Button, Spin, message } from 'antd';
 import {
   ArrowLeftOutlined,
+  CopyOutlined,
   EditOutlined,
   LeftOutlined,
   RightOutlined,
@@ -53,6 +54,33 @@ export default function Reader() {
     );
   }
 
+  /** 复制本章正文（含标题，便于直接粘贴到投稿平台） */
+  const copyContent = async () => {
+    const text = `《${chapter.title}》\n\n${(chapter.content ?? '').trim()}`;
+    if (!chapter.content?.trim()) {
+      message.info('本章还没有正文可复制');
+      return;
+    }
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        // 非安全上下文（http/localhost）降级：临时 textarea + execCommand
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      message.success('正文已复制到剪贴板');
+    } catch {
+      message.error('复制失败，请手动选择正文复制');
+    }
+  };
+
   const idx = list.findIndex((c) => c.id === cid);
   const prev = idx > 0 ? list[idx - 1] : null;
   const next = idx >= 0 && idx < list.length - 1 ? list[idx + 1] : null;
@@ -83,6 +111,14 @@ export default function Reader() {
           共 {list.length} 章
         </span>
         <div style={{ flex: 1 }} />
+        <Button
+          type="link"
+          icon={<CopyOutlined />}
+          disabled={paragraphs.length === 0}
+          onClick={copyContent}
+        >
+          复制正文
+        </Button>
         <Button type="link" icon={<EditOutlined />} onClick={() => navigate(`/write/${cid}`)}>
           编辑本章
         </Button>

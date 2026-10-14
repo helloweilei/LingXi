@@ -98,29 +98,44 @@ export const uploadApi = {
   },
 };
 
+/** 章节大纲：一行 = 一条创作前的规划（章节是该规划的产物，生成正文时才落地） */
+export interface CreateOutlineReq {
+  chapterTitle?: string | null;
+  outline?: string | null;
+  targetWords?: number | null;
+}
+
 export const outlineApi = {
-  /** 章节大纲列表：每个章节一行，含是否已生成 */
+  /** 大纲规划列表：一行一条规划 */
   list: (novelId: number) => get<ChapterOutlineItem[]>(`/novels/${novelId}/outlines`),
-  /** 一键 / 批量生成大纲（同步，仅适合少量章节）；批量请用 outlineTaskApi 异步执行。不会创建章节 */
-  generate: (novelId: number, chapterIds?: number[]) =>
+  /** 手动新增一行规划（只建大纲，不创建章节；提交后表格新增一行） */
+  create: (novelId: number, req: CreateOutlineReq) =>
+    post<ChapterOutlineItem[]>(`/novels/${novelId}/outlines`, req ?? {}),
+  /** 同步批量生成大纲内容（仅适合少量）；批量请用 outlineTaskApi 异步执行 */
+  generate: (novelId: number, outlineIds?: number[]) =>
     post<ChapterOutlineItem[]>(
       `/novels/${novelId}/outlines/generate`,
-      chapterIds ? { chapterIds } : {}
+      outlineIds ? { outlineIds } : {}
     ),
-  /** 手动新增 / 编辑单章大纲；targetWords 不传表示沿用全书均摊值 */
-  save: (novelId: number, chapterId: number, outline: string, targetWords?: number) =>
-    put<void>(`/novels/${novelId}/outlines/${chapterId}`, { outline, targetWords }),
-  /** 单独设置某章目标字数；words 传 0 表示恢复默认（全书均摊） */
-  saveWords: (novelId: number, chapterId: number, words: number | null) =>
-    put<void>(`/novels/${novelId}/outlines/${chapterId}/words`, { words }),
-  /** 删除单章大纲 */
-  remove: (novelId: number, chapterId: number) =>
-    del(`/novels/${novelId}/outlines/${chapterId}`),
+  /** 编辑一条规划；字段传 null 表示不改该字段。targetWords 传 null 表示沿用全书均摊值 */
+  save: (
+    novelId: number,
+    outlineId: number,
+    outline: string,
+    targetWords?: number | null,
+    chapterTitle?: string | null
+  ) => put<void>(`/novels/${novelId}/outlines/${outlineId}`, { outline, targetWords, chapterTitle }),
+  /** 单独设置某条规划的目标字数；words 传 0 表示恢复默认（全书均摊） */
+  saveWords: (novelId: number, outlineId: number, words: number | null) =>
+    put<void>(`/novels/${novelId}/outlines/${outlineId}/words`, { words }),
+  /** 删除一条规划 */
+  remove: (novelId: number, outlineId: number) =>
+    del(`/novels/${novelId}/outlines/${outlineId}`),
 };
 
-/** 大纲批量生成任务：后台逐章执行，前端轮询进度，避免长任务触发 HTTP 超时 */
+/** 大纲批量生成任务：后台逐条执行，前端轮询进度，避免长任务触发 HTTP 超时 */
 export const outlineTaskApi = {
-  start: (novelId: number, req: { chapterIds?: number[] }) =>
+  start: (novelId: number, req: { outlineIds?: number[] }) =>
     post<OutlineTaskVO>(`/novels/${novelId}/outline-tasks`, req),
   list: (novelId: number) => get<OutlineTaskVO[]>(`/novels/${novelId}/outline-tasks`),
   get: (taskId: number) => get<OutlineTaskVO>(`/outline-tasks/${taskId}`),

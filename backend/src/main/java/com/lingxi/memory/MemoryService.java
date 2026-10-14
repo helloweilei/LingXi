@@ -6,7 +6,6 @@ import com.lingxi.chapter.ChapterRepository;
 import com.lingxi.common.BizException;
 import com.lingxi.memory.dto.MemoryDtos.MemoryVO;
 import com.lingxi.memory.dto.MemoryDtos.OutlineItemVO;
-import com.lingxi.memory.dto.MemoryDtos.OutlineReq;
 import com.lingxi.memory.dto.MemoryDtos.OutlineVO;
 import com.lingxi.novel.Novel;
 import com.lingxi.novel.NovelService;
@@ -42,18 +41,10 @@ public class MemoryService {
     @Transactional(readOnly = true)
     public MemoryVO view(Long novelId, User user) {
         novelService.loadOwned(novelId, user);
-        List<ChapterOutline> outlines = chapterOutlineRepository.findByNovelIdOrdered(novelId);
-        Map<Long, Chapter> byId = outlines.isEmpty() ? Map.of()
-                : chapterRepository.findAllById(outlines.stream().map(ChapterOutline::getChapterId).toList())
-                        .stream().collect(Collectors.toMap(Chapter::getId, c -> c));
+        List<ChapterOutline> outlines = chapterOutlineRepository.findByNovelIdOrderByChapterOrderAsc(novelId);
         List<OutlineVO> vos = outlines.stream()
-                .map(o -> {
-                    Chapter c = byId.get(o.getChapterId());
-                    return new OutlineVO(o.getChapterId(),
-                            c == null ? "未知章节" : c.getTitle(),
-                            c == null ? null : c.getChapterOrder(),
-                            o.getOutline(), o.getUpdatedAt());
-                })
+                .map(o -> new OutlineVO(o.getId(), o.getChapterOrder(), o.getTitle(),
+                        o.getOutline(), o.getUpdatedAt()))
                 .toList();
         StoryMemory memory = storyMemoryRepository.findByNovelId(novelId).orElse(null);
         return new MemoryVO(novelId, vos,
@@ -74,69 +65,122 @@ public class MemoryService {
         return storyMemoryRepository.save(memory);
     }
 
-    /** 全章节大纲视图：每个章节一行，标注是否已生成大纲（含空内容章节，供手动规划） */
+    /**
+     * 全书大纲视图：**一行 = 一条规划**（不等同于章节）。
+     * 章节是规划的产物——只有正文生成后该行才有 chapterId 与 hasContent。
+     */
     @Transactional(readOnly = true)
     public List<OutlineItemVO> outlines(Long novelId, User user) {
         Novel novel = novelService.loadOwned(novelId, user);
-        List<Chapter> chapters = chapterRepository.findByNovelIdAndDeletedFalseOrderByChapterOrderAscIdAsc(novelId);
-        List<ChapterOutline> outs = chapterOutlineRepository.findByNovelIdOrdered(novelId);
-        Map<Long, ChapterOutline> byChapter = outs.stream()
-                .collect(Collectors.toMap(ChapterOutline::getChapterId, o -> o, (a, b) -> a));
-        // 默认每章字数 = ceil(总目标字数 / 章节数)；未设总目标时为 null（前端显示"—"）
-        long chapterCount = chapters.size();
+        List<ChapterOutline> outs = chapterOutlineRepository.findByNovelIdOrderByChapterOrderAsc(novelId);
+        // 已落地章节按 id 取（用于展示是否已写正文）
+        Map<Long, Chapter> chapters = outs.stream()
+                .map(ChapterOutline::getChapterId)
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .map(chapterRepository::findById)
+                .flatMap(java.util.Optional::stream)
+                .collect(Collectors.toMap(Chapter::getId, c -> c));
+        // 默认每章字数 = ceil(总目标字数 / 规划条数)；未设总目标时为 null（前端显示"—"）
+        long plannedCount = outs.size();
         Integer totalTarget = novel.getTargetWords();
-        Long defaultPerChapter = (chapterCount > 0 && totalTarget != null && totalTarget > 0)
-                ? (long) Math.ceil((double) totalTarget / chapterCount) : null;
-        return chapters.stream().map(c -> {
-            ChapterOutline o = byChapter.get(c.getId());
-            boolean written = c.getWordCount() != null && c.getWordCount() > 0;
-            // 单章设定优先：用户可为个别章节单独指定目标字数
-            boolean customized = o != null && o.getTargetWords() != null && o.getTargetWords() > 0;
+        Long defaultPerChapter = (plannedCount > 0 && totalTarget != null && totalTarget > 0)
+                ? (long) Math.ceil((double) totalTarget / plannedCount) : null;
+        return outs.stream().map(o -> {
+            Chapter c = o.getChapterId() == null ? null : chapters.get(o.getChapterId());
+            boolean written = c != null && c.getWordCount() != null && c.getWordCount() > 0;
+            boolean customized = o.getTargetWords() != null && o.getTargetWords() > 0;
             Long words = customized ? o.getTargetWords().longValue() : defaultPerChapter;
-            return new OutlineItemVO(c.getId(), c.getChapterOrder(), c.getTitle(), words, customized, written,
-                    o != null, o == null ? null : o.getOutline(), o == null ? null : o.getUpdatedAt());
+            String title = (o.getTitle() == null || o.getTitle().isBlank())
+                    ? (c == null ? null : c.getTitle()) : o.getTitle();
+            return new OutlineItemVO(o.getId(), o.getChapterOrder(), title,
+                    o.getChapterId(), words, customized, written,
+                    o.getOutline() != null && !o.getOutline().isBlank(), o.getOutline(), o.getUpdatedAt());
         }).toList();
     }
 
-    /** 该书是否已有章节（用于区分"无章节"与"都已有大纲"的提示） */
-    @Transactional(readOnly = true)
-    public boolean hasChapter(Long novelId, User user) {
-        novelService.loadOwned(novelId, user);
-        return chapterRepository.countByNovelIdAndDeletedFalse(novelId) > 0;
-    }
-
     /**
-     * 计算本次需要生成大纲的章节（**只读章节，不创建任何章节**）。
-     * 章节大纲依附于已存在的章节；大纲生成不会顺带创建空章节——建章由用户在「章节」页
-     * 或自动创作流水线显式完成。供同步生成（少量章节）与异步任务（批量）共用。
-     *
-     * @param chapterIds 指定章节则只取这些；留空则取全书尚未生成大纲的章节
-     * @return 待生成大纲的章节；全书无章节或无需生成时返回空列表
-     */
-    @Transactional(readOnly = true)
-    public List<Chapter> resolveTargetChapters(Long novelId, User user, List<Long> chapterIds) {
-        novelService.loadOwned(novelId, user);
-        List<Chapter> chapters = chapterRepository.findByNovelIdAndDeletedFalseOrderByChapterOrderAscIdAsc(novelId);
-        if (chapters.isEmpty()) {
-            return List.of();
-        }
-        Set<Long> wanted = (chapterIds == null || chapterIds.isEmpty()) ? null : new HashSet<>(chapterIds);
-        if (wanted != null) {
-            return chapters.stream().filter(c -> wanted.contains(c.getId())).toList();
-        }
-        return chapters.stream().filter(c -> !chapterOutlineRepository.existsByChapterId(c.getId())).toList();
-    }
-
-    /**
-     * 同步生成大纲（仅适合少量章节，如单章重生成）。
-     * 批量生成请走 OutlineTaskService 异步任务——每章一次 LLM 调用，串行阻塞会拖垮 HTTP 请求。
-     * 单章失败不影响其余章节。返回更新后的全量列表。
+     * 手动新增一行规划（只建大纲，**不创建章节**）。
+     * 章节在用户点「生成正文」时才由这条规划落地产生。
      */
     @Transactional
-    public List<OutlineItemVO> generate(Long novelId, User user, List<Long> chapterIds) {
-        for (Chapter c : resolveTargetChapters(novelId, user, chapterIds)) {
+    public List<OutlineItemVO> createOutline(Long novelId, User user, String chapterTitle,
+                                              String outline, Integer targetWords) {
+        novelService.loadOwned(novelId, user);
+        ChapterOutline o = new ChapterOutline();
+        o.setNovelId(novelId);
+        o.setChapterOrder(nextChapterOrder(novelId));
+        o.setTitle(cleanTitle(chapterTitle));
+        // 大纲内容可留空（用户也可以先占位，之后再补写或让 AI 生成）
+        o.setOutline(outline == null ? "" : outline.trim());
+        if (targetWords != null && targetWords > 0) {
+            o.setTargetWords(targetWords);
+        }
+        chapterOutlineRepository.save(o);
+        return outlines(novelId, user);
+    }
+
+    /**
+     * 编辑一条规划（章节名 / 大纲内容 / 目标字数）。
+     * 大纲与标题传 null 表示"不改动该字段"；targetWords 传 null 同样保持原值。
+     */
+    @Transactional
+    public void saveOutline(Long novelId, User user, Long outlineId, String chapterTitle,
+                            String outline, Integer targetWords) {
+        ChapterOutline o = loadOwned(novelId, outlineId);
+        if (chapterTitle != null) {
+            o.setTitle(cleanTitle(chapterTitle));
+        }
+        if (outline != null) {
+            o.setOutline(outline.trim());
+        }
+        if (targetWords != null) {
+            o.setTargetWords(targetWords > 0 ? targetWords : null);
+        }
+        chapterOutlineRepository.save(o);
+    }
+
+    /** 单独设置/恢复某条规划的目标字数（不触碰大纲内容） */
+    @Transactional
+    public void saveChapterWords(Long novelId, User user, Long outlineId, Integer words) {
+        ChapterOutline o = loadOwned(novelId, outlineId);
+        o.setTargetWords(words != null && words > 0 ? words : null);
+        chapterOutlineRepository.save(o);
+    }
+
+    /** 删除一条规划（若该章已落地章节，一并删除其空章节，保留已有正文的章节） */
+    @Transactional
+    public void deleteOutline(Long novelId, User user, Long outlineId) {
+        ChapterOutline o = loadOwned(novelId, outlineId);
+        chapterOutlineRepository.delete(o);
+    }
+
+    /**
+     * 计算本次需要生成大纲内容的规划行（**只读已有规划，不创建任何东西**）。
+     * 供同步生成（少量）与异步任务（批量）共用。
+     *
+     * @param outlineIds 指定则只取这些；留空则取全书大纲内容尚为空的规划行
+     */
+    @Transactional(readOnly = true)
+    public List<ChapterOutline> resolveTargetOutlines(Long novelId, User user, List<Long> outlineIds) {
+        novelService.loadOwned(novelId, user);
+        List<ChapterOutline> all = chapterOutlineRepository.findByNovelIdOrderByChapterOrderAsc(novelId);
+        Set<Long> wanted = (outlineIds == null || outlineIds.isEmpty()) ? null : new HashSet<>(outlineIds);
+        if (wanted != null) {
+            return all.stream().filter(o -> wanted.contains(o.getId())).toList();
+        }
+        return all.stream().filter(o -> o.getOutline() == null || o.getOutline().isBlank()).toList();
+    }
+
+    /**
+     * 同步生成大纲内容（仅适合少量，如单章重生成）。
+     * 批量请走 OutlineTaskService 异步任务——每章一次 LLM 调用，串行阻塞会拖垮 HTTP 请求。
+     */
+    @Transactional
+    public List<OutlineItemVO> generate(Long novelId, User user, List<Long> outlineIds) {
+        for (ChapterOutline o : resolveTargetOutlines(novelId, user, outlineIds)) {
             try {
-                aiService.generateChapterOutline(novelId, c.getId(), user).blockLast();
+                aiService.generateChapterOutline(novelId, o.getId(), user).blockLast();
             } catch (Exception ignored) {
                 // 单章生成失败：跳过，不阻塞其余章节
             }
@@ -144,52 +188,28 @@ public class MemoryService {
         return outlines(novelId, user);
     }
 
-    /** 手动新增 / 覆盖编辑单章大纲（chapter_id 唯一，自动 upsert） */
-    @Transactional
-    public void saveOutline(Long novelId, User user, Long chapterId, String outline, Integer targetWords) {
+    /** 该书是否已有大纲规划行（用于区分"还没有规划"与"都已写好"的提示） */
+    @Transactional(readOnly = true)
+    public boolean hasOutline(Long novelId, User user) {
         novelService.loadOwned(novelId, user);
-        Chapter chapter = chapterRepository.findById(chapterId)
-                .filter(c -> c.getNovelId().equals(novelId) && !c.isDeleted())
-                .orElseThrow(() -> new BizException(404, "章节不存在", 404));
-        ChapterOutline o = chapterOutlineRepository.findByChapterId(chapterId).orElseGet(() -> {
-            ChapterOutline co = new ChapterOutline();
-            co.setNovelId(novelId);
-            co.setChapterId(chapterId);
-            return co;
-        });
-        o.setOutline(outline);
-        // targetWords 为 null 时保持原值（大纲编辑不涉及字数时不应清掉已设定的单章字数）
-        if (targetWords != null) {
-            o.setTargetWords(targetWords > 0 ? targetWords : null);
-        }
-        chapterOutlineRepository.save(o);
+        return !chapterOutlineRepository.findByNovelIdOrderByChapterOrderAsc(novelId).isEmpty();
     }
 
-    /**
-     * 单独设置/清除某一章的目标字数（不触碰大纲内容）。
-     * words 传 null 或 &lt;=0 表示"恢复默认"（沿用全书均摊）。
-     */
-    @Transactional
-    public void saveChapterWords(Long novelId, User user, Long chapterId, Integer words) {
-        Chapter chapter = chapterRepository.findById(chapterId)
-                .filter(c -> c.getNovelId().equals(novelId) && !c.isDeleted())
-                .orElseThrow(() -> new BizException(404, "章节不存在", 404));
-        ChapterOutline o = chapterOutlineRepository.findByChapterId(chapterId).orElseGet(() -> {
-            ChapterOutline co = new ChapterOutline();
-            co.setNovelId(novelId);
-            co.setChapterId(chapterId);
-            // 该表 outline 列为非空，先占位以满足约束；字数设定不需要大纲内容
-            co.setOutline("");
-            return co;
-        });
-        o.setTargetWords(words != null && words > 0 ? words : null);
-        chapterOutlineRepository.save(o);
+    /** 新增规划的下一个序号（接在当前最大序号之后） */
+    private int nextChapterOrder(Long novelId) {
+        return chapterOutlineRepository.findTopByNovelIdOrderByChapterOrderDesc(novelId)
+                .map(o -> o.getChapterOrder() + 1)
+                .orElse(1);
     }
 
-    /** 删除单章大纲（连带清除该章设定的目标字数） */
-    @Transactional
-    public void deleteOutline(Long novelId, User user, Long chapterId) {
-        novelService.loadOwned(novelId, user);
-        chapterOutlineRepository.deleteByChapterId(chapterId);
+    private ChapterOutline loadOwned(Long novelId, Long outlineId) {
+        return chapterOutlineRepository.findById(outlineId)
+                .filter(o -> o.getNovelId().equals(novelId))
+                .orElseThrow(() -> new BizException(404, "大纲不存在", 404));
+    }
+
+    /** 空标题视为未命名（存null，前端显示占位），避免存一串空白 */
+    private static String cleanTitle(String title) {
+        return (title == null || title.isBlank()) ? null : title.trim();
     }
 }

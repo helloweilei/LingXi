@@ -69,13 +69,17 @@ export interface ChatMsg {
   content: string;
 }
 
+/** 章节大纲 = 一条创作前的规划（不等同于章节；章节是规划的产物） */
 export interface ChapterOutlineItem {
-  chapterId: number;
+  outlineId: number;
   chapterOrder: number;
-  chapterTitle: string;
-  /** 本章生效的目标字数（单章设定优先，否则全书均摊） */
+  /** 规划章节名，可能未填写 */
+  chapterTitle: string | null;
+  /** 已生成正文的章节 id；尚未生成正文时为 null */
+  chapterId: number | null;
+  /** 本条生效的目标字数（单章设定优先，否则全书均摊） */
   wordCount: number | null;
-  /** 是否为本章单独设定（false 表示沿用全书均摊，可一键恢复默认） */
+  /** 是否为本条单独设定（false 表示沿用全书均摊，可一键恢复默认） */
   wordCountCustomized: boolean;
   /** 该章是否已写正文（用于覆盖生成前的提示） */
   hasContent: boolean;

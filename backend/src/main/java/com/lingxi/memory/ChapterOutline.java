@@ -13,9 +13,11 @@ import jakarta.persistence.Table;
 import java.time.LocalDateTime;
 
 /**
- * 章节大纲：每章在创作前沉淀的“写作规划”（场景节拍、关键进展、人物弧光、收尾钩子），
- * 用于指导 AI 与作者按图施工，避免正文跑偏、收尾失控。
- * 每章至多一条（chapter_id 唯一），可反复覆盖更新。
+ * 章节大纲：**创作前的规划行**，是章节的上游产物，而不是章节的附属。
+ *
+ * 依赖方向：大纲（规划） → 生成正文 → 落地为章节。
+ * 因此本章大纲自带规划序号（chapterOrder）与规划章节名（title），
+ * 不需要先有章节才能存在；chapterId 仅在该章正文已生成时回填，用于把规划与产物对应起来。
  */
 @Entity
 @Table(name = "chapter_outlines")
@@ -28,7 +30,16 @@ public class ChapterOutline {
     @Column(name = "novel_id", nullable = false)
     private Long novelId;
 
-    @Column(name = "chapter_id", nullable = false, unique = true)
+    /** 规划序号（同一本书内从 1 递增），大纲先于章节存在时即已确定 */
+    @Column(name = "chapter_order", nullable = false)
+    private Integer chapterOrder;
+
+    /** 规划章节名（由用户填写或 AI 生成）；为空时前端显示占位名 */
+    @Column(name = "title", length = 120)
+    private String title;
+
+    /** 已生成正文的章节 id；尚未生成正文时为 null（规划先行于产物） */
+    @Column(name = "chapter_id", unique = true)
     private Long chapterId;
 
     @Lob
@@ -74,6 +85,22 @@ public class ChapterOutline {
 
     public void setChapterId(Long chapterId) {
         this.chapterId = chapterId;
+    }
+
+    public Integer getChapterOrder() {
+        return chapterOrder;
+    }
+
+    public void setChapterOrder(Integer chapterOrder) {
+        this.chapterOrder = chapterOrder;
+    }
+
+    public String getTitle() {
+        return title;
+    }
+
+    public void setTitle(String title) {
+        this.title = title;
     }
 
     public String getOutline() {

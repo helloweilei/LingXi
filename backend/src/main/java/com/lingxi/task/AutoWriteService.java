@@ -4,8 +4,8 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lingxi.ai.AiService;
 import com.lingxi.chapter.ChapterService;
-import com.lingxi.chapter.dto.ChapterDtos.SaveReq;
 import com.lingxi.common.BizException;
+import com.lingxi.memory.ChapterOutline;
 import com.lingxi.memory.ChapterOutlineRepository;
 import com.lingxi.novel.Novel;
 import com.lingxi.novel.NovelService;
@@ -140,8 +140,13 @@ public class AutoWriteService {
             throw new BizException(400, "任务进行中，请先取消再删除", 400);
         }
         for (Long cid : parseIds(task.getCreatedChapters())) {
+            // 删章节前先解除与规划的关联，并清掉该章的规划（该规划由本任务产生）
+            chapterOutlineRepository.findByChapterId(cid).ifPresent(o -> {
+                o.setChapterId(null);
+                chapterOutlineRepository.save(o);
+                chapterOutlineRepository.delete(o);
+            });
             chapterService.delete(cid, user);
-            chapterOutlineRepository.deleteByChapterId(cid);
         }
         if (Boolean.TRUE.equals(task.getGeneratedOutline())) {
             Novel novel = novelService.loadOwned(task.getNovelId(), user);
@@ -193,8 +198,6 @@ public class AutoWriteService {
             while (task.getCurrentChapter() < task.getTotalChapters() && isActive(task.getId())) {
                 int next = task.getCurrentChapter() + 1;
                 var existing = chapterService.findByNovelAndOrder(novel.getId(), next, user);
-                Long chapterId;
-                int chapterOrder;
                 if (existing.isPresent() && existing.get().wordCount() > 0) {
                     // 已有正文：幂等跳过，仅推进进度（续跑场景下前面的章节不动）
                     task.setCurrentChapter(next);
@@ -203,40 +206,34 @@ public class AutoWriteService {
                     saveTask(task);
                     continue;
                 }
-                if (existing.isPresent()) {
-                    // 上次失败残留的空壳章节（0 字）：复用，不新建
-                    chapterId = existing.get().id();
-                    chapterOrder = existing.get().chapterOrder();
-                    appendCreatedChapter(task, chapterId);
-                    saveTask(task);
-                } else {
-                    var ch = chapterService.create(novel.getId(), user, new SaveReq(null, null, null));
-                    chapterId = ch.id();
-                    chapterOrder = ch.chapterOrder();
-                    appendCreatedChapter(task, chapterId);
-                    saveTask(task); // 先记录章节归属：中途失败也能被删除任务清理
-                }
-                // 生成整章正文；LLM 偶发空响应时自动重试（共 3 次）
-                // 写前先生成章节大纲（规划）：若开启 autoOutline，先产出本章大纲并落库，
-                // 随后 writeChapter 会读取该大纲，严格按规划写正文，避免跑偏、收尾失控。
+                // 依赖方向：大纲（规划）先行 → 正文生成时落地为章节。
+                // 因此这里确保该序号的规划行存在（不存在则建一条空规划），再据此生成内容。
+                Long outlineId = ensureOutlineRow(novel.getId(), next);
+                // 若开启 autoOutline，先为本条规划产出章节名与大纲内容，
+                // 随后写正文会严格按此规划施工，避免跑偏、收尾失控。
                 if (p.autoOutline) {
-                    collect(aiService.generateChapterOutline(novel.getId(), chapterId, user));
+                    collect(aiService.generateChapterOutline(novel.getId(), outlineId, user));
                 }
+                // 生成整章正文（内部会落地章节、写入正文、并对截断自动续写）；空响应自动重试
                 String content = null;
-                for (int attempt = 1; attempt <= 3 && (content == null || content.isBlank()); attempt++) {
-                    if (attempt > 1) {
-                        log.warn("Auto write novel {} chapter {} returned blank content, retry {}/3",
-                                novel.getId(), next, attempt);
+                for (int attempt = 1; attempt <= 3; attempt++) {
+                    content = collect(aiService.writeChapterAndSave(novel.getId(), outlineId, user, p.chapters, false));
+                    if (content != null && !content.isBlank()) {
+                        break;
                     }
-                    content = collect(aiService.writeChapter(novel.getId(), chapterId, user, p.chapters, false));
+                    log.warn("Auto write novel {} chapter {} returned blank content, attempt {}/3",
+                            novel.getId(), next, attempt);
                 }
-                if (content.isBlank()) {
+                if (content == null || content.isBlank()) {
                     throw new BizException(502, "AI 未生成正文（第 " + next + " 章）", 502);
                 }
-                // 若因单次输出上限被截断（末尾半句话），自动续写补全，避免产出废稿
-                content = aiService.completeIfTruncated(novel, user, content);
-                String title = "第" + chapterOrder + " 章";
-                chapterService.save(chapterId, user, new SaveReq(title, content, "ai"));
+                String title = resolveChapterTitle(novel.getId(), next);
+                // 记录本章归属：中途失败也能被"删除任务"清理
+                Long landedChapterId = resolveChapterIdByOutline(novel.getId(), outlineId);
+                if (landedChapterId != null) {
+                    appendCreatedChapter(task, landedChapterId);
+                    saveTask(task);
+                }
 
                 task.setCurrentChapter(next);
                 task.setCurrentTitle(title);
@@ -293,6 +290,42 @@ public class AutoWriteService {
         return taskRepository.findById(taskId)
                 .map(t -> t.getStatus() == WritingTaskStatus.RUNNING || t.getStatus() == WritingTaskStatus.QUEUED)
                 .orElse(false);
+    }
+
+    /**
+     * 确保第 chapterOrder 章存在一条**规划行**（大纲），不存在则创建一条空规划。
+     * 大纲先于章节存在：这里是流水线里唯一产生规划的入口，章节随后由规划落地。
+     */
+    private Long ensureOutlineRow(Long novelId, int chapterOrder) {
+        return chapterOutlineRepository.findByNovelIdAndChapterOrder(novelId, chapterOrder)
+                .map(ChapterOutline::getId)
+                .orElseGet(() -> {
+                    ChapterOutline o = new ChapterOutline();
+                    o.setNovelId(novelId);
+                    o.setChapterOrder(chapterOrder);
+                    o.setOutline("");
+                    chapterOutlineRepository.save(o);
+                    return o.getId();
+                });
+    }
+
+    /**
+     * 取该规划已落地出的章节 id（用于记录任务产物、便于删除任务时清理）。
+     * 校验 novelId 归属，防止跨书取到他人规划。
+     */
+    private Long resolveChapterIdByOutline(Long novelId, Long outlineId) {
+        return chapterOutlineRepository.findById(outlineId)
+                .filter(o -> o.getNovelId().equals(novelId))
+                .map(ChapterOutline::getChapterId)
+                .orElse(null);
+    }
+
+    /** 任务进度展示用标题：优先用规划上的章节名 */
+    private String resolveChapterTitle(Long novelId, int chapterOrder) {
+        return chapterOutlineRepository.findByNovelIdAndChapterOrder(novelId, chapterOrder)
+                .map(ChapterOutline::getTitle)
+                .filter(t -> t != null && !t.isBlank())
+                .orElse("第" + chapterOrder + "章");
     }
 
     private void appendCreatedChapter(WritingTask task, Long chapterId) {

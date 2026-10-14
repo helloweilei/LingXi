@@ -13,7 +13,12 @@ import {
   Typography,
   message,
 } from "antd";
-import { DeleteOutlined, HistoryOutlined, RollbackOutlined } from "@ant-design/icons";
+import {
+  CopyOutlined,
+  DeleteOutlined,
+  HistoryOutlined,
+  RollbackOutlined,
+} from "@ant-design/icons";
 import dayjs from "dayjs";
 import { chapterApi } from "../api";
 import type { Chapter, ChapterVersion } from "../api/types";
@@ -102,6 +107,31 @@ export default function VersionHistoryModal({
       message.error(e?.message ?? "删除失败");
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  /** 一键复制文本；clipboard 在非安全上下文不可用时降级为 execCommand */
+  const copyText = async (text: string) => {
+    if (!text.trim()) {
+      message.warning("没有可复制的内容");
+      return;
+    }
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+      }
+      message.success("已复制到剪贴板");
+    } catch {
+      message.error("复制失败，请手动选中文本复制");
     }
   };
 
@@ -226,6 +256,11 @@ export default function VersionHistoryModal({
         width={760}
         footer={
           <Space>
+            {preview && (
+              <Button icon={<CopyOutlined />} onClick={() => copyText(preview.content ?? "")}>
+                复制正文
+              </Button>
+            )}
             <Button onClick={() => setPreview(null)}>关闭</Button>
             {preview && (
               <Popconfirm

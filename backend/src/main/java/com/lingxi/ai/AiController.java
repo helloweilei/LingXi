@@ -73,12 +73,15 @@ public class AiController {
         return SseStreams.toSse(aiService.chat(novelId, req, user));
     }
 
-    /** 生成章节大纲：流式输出，完成后自动写入该章大纲（chapter_outlines），用于创作前规划 */
-    @PostMapping(value = "/novels/{novelId}/chapters/{chapterId}/outline", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    /**
+     * 生成一条大纲规划（流式）：完成后自动写回该规划行的章节名与大纲内容。
+     * 大纲先于章节存在，不需要已有章节。
+     */
+    @PostMapping(value = "/novels/{novelId}/outlines/{outlineId}/generate", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<String>> generateChapterOutline(@AuthenticationPrincipal User user,
                                                                @PathVariable Long novelId,
-                                                               @PathVariable Long chapterId) {
-        return SseStreams.toSse(aiService.generateChapterOutline(novelId, chapterId, user));
+                                                               @PathVariable Long outlineId) {
+        return SseStreams.toSse(aiService.generateChapterOutline(novelId, outlineId, user));
     }
 
     /** 生成封面提示词请求：authorName 可选，作者名会原样写入提示词并禁止 AI 改写 */
@@ -102,30 +105,31 @@ public class AiController {
     }
 
     /**
-     * 生成整章正文（**整章重写**）：流式输出，完成后覆盖写入（旧内容自动留版本快照，可回滚）。
+     * 按大纲规划生成整章正文（**整章重写**）：流式输出，完成后覆盖写入（旧内容自动留版本快照，可回滚）。
+     * 若该规划尚未生成过正文，会在此创建对应章节——**章节由大纲落地而来**。
      * 忽略本章已有正文，从上一章结尾重新写起——这是「生成正文」按钮的语义。
-     * 章节已有正文时，前端应先弹确认提示覆盖风险再调用。
      */
-    @PostMapping(value = "/novels/{novelId}/chapters/{chapterId}/write", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @PostMapping(value = "/novels/{novelId}/outlines/{outlineId}/write", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<String>> writeChapter(@AuthenticationPrincipal User user,
                                                       @PathVariable Long novelId,
-                                                      @PathVariable Long chapterId,
+                                                      @PathVariable Long outlineId,
                                                       @RequestBody(required = false) WriteReq req) {
         Integer total = req != null ? req.totalChapters() : null;
-        return SseStreams.toSse(aiService.writeChapterAndSave(novelId, chapterId, user, total, false));
+        return SseStreams.toSse(aiService.writeChapterAndSave(novelId, outlineId, user, total, false));
     }
 
     /**
      * 从本章当前内容**接着写**（只增不重）：仅在已有正文时可用，结果追加到原文之后。
      * 这是与「生成正文」不同的独立能力，对应前端「从当前内容接着写」入口。
      */
-    @PostMapping(value = "/novels/{novelId}/chapters/{chapterId}/write-continue", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @PostMapping(value = "/novels/{novelId}/outlines/{outlineId}/write-continue",
+            produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<String>> writeChapterContinue(@AuthenticationPrincipal User user,
                                                               @PathVariable Long novelId,
-                                                              @PathVariable Long chapterId,
+                                                              @PathVariable Long outlineId,
                                                               @RequestBody(required = false) WriteReq req) {
         Integer total = req != null ? req.totalChapters() : null;
-        return SseStreams.toSse(aiService.writeChapterAndSave(novelId, chapterId, user, total, true));
+        return SseStreams.toSse(aiService.writeChapterAndSave(novelId, outlineId, user, total, true));
     }
 
     /** 错别字校对请求：text 为待校对文本 */

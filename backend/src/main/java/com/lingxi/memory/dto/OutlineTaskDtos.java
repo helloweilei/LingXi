@@ -8,8 +8,11 @@ public final class OutlineTaskDtos {
     private OutlineTaskDtos() {
     }
 
-    /** 发起批量生成大纲任务：chapterIds 留空表示全书未生成大纲的章节（不会创建章节，需已有章节） */
-    public record StartReq(List<Long> chapterIds) {
+    /**
+     * 发起批量生成大纲任务：outlineIds 留空表示全书大纲内容为空的规划行。
+     * 仅对已有规划行生成内容，不会创建规划或章节。
+     */
+    public record StartReq(List<Long> outlineIds) {
     }
 
     /** 任务视图（前端轮询进度用） */

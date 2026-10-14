@@ -1,28 +1,22 @@
 package com.lingxi.memory;
 
 import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Query;
-import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 import java.util.Optional;
 
 public interface ChapterOutlineRepository extends JpaRepository<ChapterOutline, Long> {
 
-    /** 按章节顺序取全书大纲（过滤已删除章节），供记忆注入与规划视图 */
-    @Query("""
-            select o from ChapterOutline o
-            join Chapter c on c.id = o.chapterId
-            where o.novelId = :novelId and c.deleted = false
-            order by c.chapterOrder asc, c.id asc
-            """)
-    List<ChapterOutline> findByNovelIdOrdered(@Param("novelId") Long novelId);
+    /** 全书大纲行，按规划序号升序（大纲是独立规划行，不再依赖章节表） */
+    List<ChapterOutline> findByNovelIdOrderByChapterOrderAsc(Long novelId);
+
+    /** 按规划序号定位一行（生成正文时据此落地章节 / 追加规划） */
+    Optional<ChapterOutline> findByNovelIdAndChapterOrder(Long novelId, Integer chapterOrder);
+
+    /** 该书最后一个规划序号，用于新增大纲时接续编号；无大纲返回空 */
+    Optional<ChapterOutline> findTopByNovelIdOrderByChapterOrderDesc(Long novelId);
 
     Optional<ChapterOutline> findByChapterId(Long chapterId);
-
-    boolean existsByChapterId(Long chapterId);
-
-    void deleteByChapterId(Long chapterId);
 
     void deleteByNovelId(Long novelId);
 }

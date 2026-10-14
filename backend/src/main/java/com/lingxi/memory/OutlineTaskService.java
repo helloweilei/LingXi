@@ -1,7 +1,6 @@
 package com.lingxi.memory;
 
 import com.lingxi.ai.AiService;
-import com.lingxi.chapter.Chapter;
 import com.lingxi.common.BizException;
 import com.lingxi.memory.dto.OutlineTaskDtos.StartReq;
 import com.lingxi.memory.dto.OutlineTaskDtos.TaskVO;
@@ -54,17 +53,17 @@ public class OutlineTaskService {
         executor.shutdownNow();
     }
 
-    /** 提交批量生成大纲任务，立即返回（不阻塞调用方）。仅对已存在的章节生成，不创建章节。 */
+    /** 提交批量生成大纲任务，立即返回（不阻塞调用方）。仅对已有规划行生成内容，不创建规划/章节。 */
     @Transactional
     public TaskVO start(Long novelId, User user, StartReq req) {
         // 校验属主（越权返回 404）
         memoryService.outlines(novelId, user);
-        List<Long> ids = req == null ? null : req.chapterIds();
-        if (memoryService.resolveTargetChapters(novelId, user, ids).isEmpty()) {
+        List<Long> ids = req == null ? null : req.outlineIds();
+        if (memoryService.resolveTargetOutlines(novelId, user, ids).isEmpty()) {
             throw new BizException(400,
-                    memoryService.hasChapter(novelId, user)
-                            ? "所有章节都已有大纲，无需重复生成"
-                            : "还没有章节，请先到「章节」页新建章节（大纲生成不会自动创建章节）",
+                    memoryService.hasOutline(novelId, user)
+                            ? "所有大纲都已填写内容，无需重复生成"
+                            : "还没有大纲规划，请先点「新增大纲」或「一键生成大纲」创建规划行",
                     400);
         }
         if (taskRepository.existsByNovelIdAndStatusIn(novelId, ACTIVE)) {
@@ -82,7 +81,7 @@ public class OutlineTaskService {
         return toVO(task);
     }
 
-    /** 后台执行：逐章生成大纲并推进进度；单章失败只计数、不中断整批 */
+    /** 后台执行：逐条生成大纲内容并推进进度；单条失败只计数、不中断整批 */
     private void run(Long taskId, User actor) {
         try {
             OutlineTask task = load(taskId);
@@ -90,27 +89,27 @@ public class OutlineTaskService {
             taskRepository.save(task);
 
             List<Long> ids = parseIds(task.getChapterIds());
-            List<Chapter> targets = memoryService.resolveTargetChapters(task.getNovelId(), actor,
+            List<ChapterOutline> targets = memoryService.resolveTargetOutlines(task.getNovelId(), actor,
                     ids.isEmpty() ? null : ids);
             task.setTotal(targets.size());
             taskRepository.save(task);
 
             int index = 0;
-            for (Chapter c : targets) {
+            for (ChapterOutline o : targets) {
                 OutlineTask current = load(taskId);
                 if (current.getStatus() == OutlineTask.Status.CANCELLED) {
                     return;
                 }
                 index++;
                 current.setCurrentIndex(index);
-                current.setCurrentTitle(c.getTitle());
+                current.setCurrentTitle(o.getTitle());
                 taskRepository.save(current);
                 try {
-                    aiService.generateChapterOutline(task.getNovelId(), c.getId(), actor)
+                    aiService.generateChapterOutline(task.getNovelId(), o.getId(), actor)
                             .blockLast(COLLECT_TIMEOUT);
                     current.setSucceeded(current.getSucceeded() + 1);
                 } catch (Exception e) {
-                    log.warn("生成第 {} 章大纲失败: {}", c.getChapterOrder(), e.toString());
+                    log.warn("生成第 {} 章大纲失败: {}", o.getChapterOrder(), e.toString());
                     current.setFailed(current.getFailed() + 1);
                 }
                 current.setError(null);

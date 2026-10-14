@@ -209,13 +209,16 @@ public class AiService {
         // 仅"续写"模式才带入本章已有内容；重写模式必须忽略它，否则会从旧稿接着写
         String currentTail = appendExisting ? tail(chapter.getContent(), 1200) : "";
 
-        // 全书章节总数：显式传入优先，否则取当前已有章节数
+        // 全书章节总数：显式传入优先；否则以「规划条数」为准（大纲先行，章节由规划落地）
+        long planned = chapterOutlineRepository.findByNovelIdOrderByChapterOrderAsc(novel.getId()).size();
         long total = totalChapters != null && totalChapters > 0
                 ? totalChapters
-                : chapterRepository.countByNovelIdAndDeletedFalse(novel.getId());
+                : (planned > 0 ? planned : chapterRepository.countByNovelIdAndDeletedFalse(novel.getId()));
         boolean isFinalChapter = total > 0 && chapter.getChapterOrder() >= total;
 
         StringBuilder prompt = new StringBuilder(baseContext(novel));
+        ChapterOutline prevOutline = prevChapter == null ? null
+                : findOutlineByOrder(novel.getId(), prevChapter.getChapterOrder());
         if (prevChapter != null) {
             prompt.append("\n\n【上一章】第").append(prevChapter.getChapterOrder()).append("章");
             if (prevTitle != null && !prevTitle.isBlank()) {
@@ -223,12 +226,10 @@ public class AiService {
             }
             prompt.append("\n");
             // 上一章大纲：让 AI 知道上一章整体发生了什么，而不只是末尾几百字
-            chapterOutlineRepository.findByChapterId(prevChapter.getId()).ifPresent(o -> {
-                if (!isBlank(o.getOutline())) {
-                    prompt.append("【上一章大纲（上一章完整发生了什么）】\n")
-                            .append(tail(o.getOutline(), 900)).append("\n");
-                }
-            });
+            if (prevOutline != null && !isBlank(prevOutline.getOutline())) {
+                prompt.append("【上一章大纲（上一章完整发生了什么）】\n")
+                        .append(tail(prevOutline.getOutline(), 900)).append("\n");
+            }
             prompt.append("【上一章结尾原文（务必从这段之后无缝衔接，不要另起炉灶）】\n")
                     .append(prevTail).append("\n");
         } else {
@@ -251,12 +252,11 @@ public class AiService {
                     .append(currentTail);
         }
         // 注入本章大纲（若存在）：让 AI 严格按规划施工，避免跑偏、收尾失控
-        chapterOutlineRepository.findByChapterId(chapter.getId()).ifPresent(o -> {
-            if (!isBlank(o.getOutline())) {
-                prompt.append("\n【本章大纲（请严格据此展开，确保要点全部覆盖、收尾呼应大纲）】\n")
-                        .append(o.getOutline()).append("\n");
-            }
-        });
+        ChapterOutline curOutline = findOutlineByOrder(novel.getId(), chapter.getChapterOrder());
+        if (curOutline != null && !isBlank(curOutline.getOutline())) {
+            prompt.append("\n【本章大纲（请严格据此展开，确保要点全部覆盖、收尾呼应大纲）】\n")
+                    .append(curOutline.getOutline()).append("\n");
+        }
         prompt.append("\n【文风要求】\n").append(styleDirective(novel));
         prompt.append(isFinalChapter ? """
 
@@ -288,17 +288,21 @@ public class AiService {
     }
 
     /**
-     * 按大纲生成整章正文并落库（覆盖式，但 ChapterService.save 会先为旧内容留版本快照，可回滚）。
-     * 流式输出正文的同时在 onComplete 时整章覆盖写入：用于“章节大纲→正文”的一键生成。
-     * 前端先用 Popconfirm 提示覆盖风险，再调用本接口。
+     * 按大纲规划生成整章正文并落库。
+     *
+     * **落地逻辑（依赖方向的体现）**：大纲是规划、章节是产物。
+     * 若该规划尚未生成过正文，就在此**创建对应章节**（序号=规划序号，标题=规划章节名），
+     * 再把正文写入；已生成过则按语义覆盖或追加，并自动留版本快照可回滚。
      */
-    public Flux<String> writeChapterAndSave(Long novelId, Long chapterId, User user, Integer totalChapters,
-                                         boolean appendExisting) {
-        Chapter chapter = loadChapter(novelId, chapterId);
+    public Flux<String> writeChapterAndSave(Long novelId, Long outlineId, User user, Integer totalChapters,
+                                            boolean appendExisting) {
         Novel novel = novelService.loadOwned(novelId, user);
+        ChapterOutline outline = loadOutline(novelId, outlineId);
+        // 规划 → 章节：没有章节就在此刻落地创建
+        Chapter chapter = landChapter(novel, outline, user);
         String title = chapter.getTitle();
         StringBuilder acc = new StringBuilder();
-        return writeChapter(novelId, chapterId, user, totalChapters, appendExisting)
+        return writeChapter(novelId, chapter.getId(), user, totalChapters, appendExisting)
                 .doOnNext(acc::append)
                 .doOnComplete(() -> {
                     String generated = acc.toString().trim();
@@ -315,11 +319,44 @@ public class AiService {
                             content = completeIfTruncated(novel, user, generated);
                         } catch (Exception e) {
                             // 续写失败不阻断：至少保存已生成的部分
-                            log.warn("章节 {} 截断续写失败，保存已生成部分", chapterId);
+                            log.warn("章节 {} 截断续写失败，保存已生成部分", chapter.getId());
                         }
                     }
                     chapterService.save(chapter.getId(), user, new SaveReq(title, content, "ai"));
                 });
+    }
+
+    /**
+     * 把一条规划落地为章节：已存在则复用，不存在则按规划序号/标题创建，并回填 outline.chapterId。
+     * 这是「章节由大纲生成」的唯一入口。
+     */
+    private Chapter landChapter(Novel novel, ChapterOutline outline, User user) {
+        if (outline.getChapterId() != null) {
+            Chapter existing = chapterRepository.findById(outline.getChapterId())
+                    .filter(c -> !c.isDeleted())
+                    .orElse(null);
+            if (existing != null) {
+                return existing;
+            }
+        }
+        // 规划序号（实体上为非空，这里兜底防拆箱 NPE）
+        int order = outline.getChapterOrder() == null ? 1 : outline.getChapterOrder();
+        // 同序号的章节（历史数据或用户手工建章）优先复用，避免出现两章同序号
+        Chapter byOrder = chapterRepository
+                .findFirstByNovelIdAndDeletedFalseAndChapterOrder(novel.getId(), order)
+                .orElse(null);
+        String title = isBlank(outline.getTitle())
+                ? (byOrder == null ? null : byOrder.getTitle())
+                : outline.getTitle();
+        // ChapterService 返回的是 VO（视图对象），取回 id 后再取实体供后续使用
+        Long chapterId = (byOrder != null)
+                ? chapterService.save(byOrder.getId(), user, new SaveReq(title, byOrder.getContent(), null)).id()
+                : chapterService.createAtOrder(novel.getId(), user, order, title).id();
+        Chapter chapter = chapterRepository.findById(chapterId).orElseThrow();
+        // 规划与产物关联（chapterId 必须落库，否则下次无法复用同一章）
+        outline.setChapterId(chapterId);
+        chapterOutlineRepository.save(outline);
+        return chapter;
     }
 
     /** 最多自动续写轮数，避免异常情况下无限生成 */
@@ -431,16 +468,28 @@ public class AiService {
      * 同时让 AI 顺带产出一个有信息量的章节名——用户已命名（或有正文）时不覆盖。
      * 流式完成后持久化；中途取消/失败不落库。
      */
-    public Flux<String> generateChapterOutline(Long novelId, Long chapterId, User user) {
+    public Flux<String> generateChapterOutline(Long novelId, Long outlineId, User user) {
         Novel novel = novelService.loadOwned(novelId, user);
-        Chapter chapter = loadChapter(novelId, chapterId);
+        ChapterOutline outline = loadOutline(novelId, outlineId);
         StringBuilder prompt = new StringBuilder(contextBuilder.buildNovelInfo(novel))
-                .append("\n【当前章节】第").append(chapter.getChapterOrder())
-                .append("章《").append(chapter.getTitle()).append("》\n");
-        String content = chapter.getContent();
-        if (content != null && !content.isBlank()) {
-            prompt.append("（本章已有部分草稿，可据此提炼更贴合的规划；若尚未动笔则自由规划）\n");
-            prompt.append("【本章已有内容】\n").append(tail(content, 2000)).append("\n");
+                .append("\n【当前要规划的章节】第").append(outline.getChapterOrder()).append("章");
+        if (!isBlank(outline.getTitle())) {
+            prompt.append("（已拟定章节名：").append(outline.getTitle()).append("）");
+        }
+        prompt.append("\n");
+        if (!isBlank(outline.getOutline())) {
+            prompt.append("（已有大纲草稿，可据此补全细化）\n【已有草稿】\n")
+                    .append(tail(outline.getOutline(), 2000)).append("\n");
+        }
+        // 该规划若已落地章节，带着已有正文让规划更贴合
+        String existingContent = null;
+        if (outline.getChapterId() != null) {
+            Chapter landed = chapterRepository.findById(outline.getChapterId()).orElse(null);
+            if (landed != null && !isBlank(landed.getContent())) {
+                existingContent = landed.getContent();
+                prompt.append("【该章已有正文（规划须与已写内容一致）】\n")
+                        .append(tail(existingContent, 2000)).append("\n");
+            }
         }
         prompt.append("\n【文风要求】\n").append(styleDirective(novel));
         prompt.append("""
@@ -466,9 +515,10 @@ public class AiService {
                 只输出上述格式内容，不要写正文，不要额外解释。
                 """);
         StringBuilder acc = new StringBuilder();
-        return llm(user).stream(AiTaskType.CHAPTER_OUTLINE, contextOf(novel, content), SYSTEM_PROMPT, prompt.toString())
+        return llm(user).stream(AiTaskType.CHAPTER_OUTLINE, contextOf(novel, existingContent),
+                        SYSTEM_PROMPT, prompt.toString())
                 .doOnNext(acc::append)
-                .doOnComplete(() -> persistOutlineAndTitle(novel, chapter, acc.toString().trim(), user));
+                .doOnComplete(() -> persistOutlineAndTitle(novel, outline, acc.toString().trim(), user));
     }
 
     /**
@@ -514,26 +564,40 @@ public class AiService {
     }
 
     /**
-     * 解析 AI 输出（章节名 + 大纲）并分别落库。
+     * 解析 AI 输出（章节名 + 大纲）并分别落库到这条**规划行**上。
      * 解析失败时按纯大纲处理（兼容旧格式），不影响大纲功能。
      */
-    private void persistOutlineAndTitle(Novel novel, Chapter chapter, String raw, User user) {
+    private void persistOutlineAndTitle(Novel novel, ChapterOutline outline, String raw, User user) {
         if (raw == null || raw.isBlank()) {
             return;
         }
         String title = null;
-        String outline = raw;
+        String text = raw;
         java.util.regex.Matcher m = TITLE_PATTERN.matcher(raw);
         if (m.find()) {
             title = normalizeTitle(m.group(1));
-            outline = raw.substring(m.end()).trim();
+            text = raw.substring(m.end()).trim();
         }
-        // 大纲正文里可能带上 "大纲：" 这行标签
-        outline = stripLeadingLabel(outline, "大纲");
-        saveOutline(novel.getId(), chapter.getId(), outline);
-        // 仅在用户尚未命名、且本章还没有正文时才自动命名，避免覆盖用户已定的名字
-        if (title != null && isPlaceholderTitle(chapter.getTitle()) && isBlank(chapter.getContent())) {
-            chapterService.save(chapter.getId(), user, new SaveReq(title, null, "ai-title"));
+        text = stripLeadingLabel(text, "大纲");
+        boolean changed = false;
+        if (!text.isBlank()) {
+            outline.setOutline(text);
+            changed = true;
+        }
+        // 章节名写回规划行：仅当用户尚未命名时才用 AI 的名字
+        if (title != null && isPlaceholderTitle(outline.getTitle())) {
+            outline.setTitle(title);
+            changed = true;
+        }
+        if (changed) {
+            chapterOutlineRepository.save(outline);
+        }
+        // 同步更新已落地章节的标题（若该规划已生成过正文）
+        if (title != null && outline.getChapterId() != null) {
+            Chapter landed = chapterRepository.findById(outline.getChapterId()).orElse(null);
+            if (landed != null && isPlaceholderTitle(landed.getTitle()) && isBlank(landed.getContent())) {
+                chapterService.save(landed.getId(), user, new SaveReq(title, null, "ai-title"));
+            }
         }
     }
 
@@ -584,7 +648,7 @@ public class AiService {
         List<NovelCharacter> characters = characterRepository.findByNovelIdOrderByCreatedAtAscIdAsc(novel.getId());
         List<WorldSetting> worlds = worldSettingRepository.findByNovelIdOrderByCreatedAtAscIdAsc(novel.getId());
         StoryMemory memory = storyMemoryRepository.findByNovelId(novel.getId()).orElse(null);
-        List<ChapterOutline> outlines = chapterOutlineRepository.findByNovelIdOrdered(novel.getId());
+        List<ChapterOutline> outlines = chapterOutlineRepository.findByNovelIdOrderByChapterOrderAsc(novel.getId());
         return contextBuilder.buildBase(novel, characters, worlds, memory, outlines);
     }
 
@@ -603,12 +667,11 @@ public class AiService {
         } else {
             prompt.append("（当前章节尚未命名）\n");
         }
-        chapterOutlineRepository.findByChapterId(chapter.getId()).ifPresent(o -> {
-            if (!isBlank(o.getOutline())) {
-                prompt.append("【本章已有写作大纲（标题须贴合这些要点）】\n")
-                        .append(tail(o.getOutline(), 1500)).append("\n");
-            }
-        });
+        ChapterOutline outline = findOutlineByOrder(novel.getId(), chapter.getChapterOrder());
+        if (outline != null && !isBlank(outline.getOutline())) {
+            prompt.append("【本章已有写作大纲（标题须贴合这些要点）】\n")
+                    .append(tail(outline.getOutline(), 1500)).append("\n");
+        }
         String content = chapter.getContent();
         if (!isBlank(content)) {
             prompt.append("【本章已写内容（标题须贴合开头情节）】\n").append(tail(content, 1500)).append("\n");
@@ -658,30 +721,31 @@ public class AiService {
      * 避免"每章像另起炉灶"。按章序倒序收集，再正序输出。
      */
     private void appendRecentOutlinesBrief(StringBuilder prompt, Long novelId, int currentOrder) {
-        List<Chapter> recent = chapterRepository
-                .findByNovelIdAndDeletedFalseOrderByChapterOrderAscIdAsc(novelId).stream()
-                .filter(c -> c.getChapterOrder() < currentOrder)
+        // 前文概览直接取规划行（章节可能尚未生成，但规划已定）
+        List<ChapterOutline> prior = chapterOutlineRepository.findByNovelIdOrderByChapterOrderAsc(novelId).stream()
+                .filter(o -> o.getChapterOrder() < currentOrder)
                 .toList();
-        if (recent.isEmpty()) {
+        if (prior.isEmpty()) {
             return;
         }
-        int fromIndex = Math.max(0, recent.size() - RECENT_OUTLINE_CHAPTERS);
-        StringBuilder sb = new StringBuilder("\n【前文剧情回顾（务必与之一致，不要另起炉灶）】\n");
-        for (int i = fromIndex; i < recent.size(); i++) {
-            Chapter c = recent.get(i);
-            ChapterOutline o = chapterOutlineRepository.findByChapterId(c.getId()).orElse(null);
-            String brief = o != null && !isBlank(o.getOutline()) ? o.getOutline() : null;
-            if (brief == null) {
+        int fromIndex = Math.max(0, prior.size() - RECENT_OUTLINE_CHAPTERS);
+        String header = "\n【前文剧情回顾（务必与之一致，不要另起炉灶）】\n";
+        StringBuilder sb = new StringBuilder(header);
+        for (int i = fromIndex; i < prior.size(); i++) {
+            ChapterOutline o = prior.get(i);
+            String brief = o.getOutline();
+            if (isBlank(brief) && o.getChapterId() != null) {
                 // 无大纲时退化为该章正文尾部，保证至少有"前情"
-                brief = tail(c.getContent(), 160);
+                Chapter landed = chapterRepository.findById(o.getChapterId()).orElse(null);
+                brief = landed == null ? null : tail(landed.getContent(), 160);
             }
             if (isBlank(brief)) {
                 continue;
             }
-            sb.append("第").append(c.getChapterOrder()).append("章：")
+            sb.append("第").append(o.getChapterOrder()).append("章：")
                     .append(tail(brief, RECENT_OUTLINE_CHARS)).append("\n");
         }
-        if (sb.length() > "\n【前文剧情回顾（务必与之一致，不要另起炉灶）】\n".length()) {
+        if (sb.length() > header.length()) {
             prompt.append(sb);
         }
     }
@@ -706,15 +770,17 @@ public class AiService {
      */
     private int perChapterTargetWords(Novel novel, Long chapterId) {
         if (chapterId != null) {
-            Integer custom = chapterOutlineRepository.findByChapterId(chapterId)
-                    .map(ChapterOutline::getTargetWords)
-                    .orElse(null);
-            if (custom != null && custom > 0) {
-                return Math.min(custom, MAX_CHAPTER_WORDS);
+            ChapterOutline byChapter = chapterOutlineRepository.findByChapterId(chapterId).orElse(null);
+            if (byChapter != null && byChapter.getTargetWords() != null && byChapter.getTargetWords() > 0) {
+                return Math.min(byChapter.getTargetWords(), MAX_CHAPTER_WORDS);
             }
         }
         Integer total = novel.getTargetWords();
-        long count = chapterRepository.countByNovelIdAndDeletedFalse(novel.getId());
+        // 均摊基数用「规划条数」：大纲先行于章节，规划数才是全书真实章节数
+        long count = chapterOutlineRepository.findByNovelIdOrderByChapterOrderAsc(novel.getId()).size();
+        if (count == 0) {
+            count = chapterRepository.countByNovelIdAndDeletedFalse(novel.getId());
+        }
         int words = FALLBACK_CHAPTER_WORDS;
         if (total != null && total > 0 && count > 0) {
             words = (int) Math.ceil((double) total / count);
@@ -728,18 +794,16 @@ public class AiService {
                 .orElseThrow(() -> new BizException(404, "章节不存在", 404));
     }
 
-    private void saveOutline(Long novelId, Long chapterId, String outline) {
-        if (outline == null || outline.isBlank()) {
-            return;
-        }
-        ChapterOutline o = chapterOutlineRepository.findByChapterId(chapterId).orElseGet(() -> {
-            ChapterOutline co = new ChapterOutline();
-            co.setNovelId(novelId);
-            co.setChapterId(chapterId);
-            return co;
-        });
-        o.setOutline(outline);
-        chapterOutlineRepository.save(o);
+    /** 加载一条大纲规划行（含属主校验，越权返回 404） */
+    private ChapterOutline loadOutline(Long novelId, Long outlineId) {
+        return chapterOutlineRepository.findById(outlineId)
+                .filter(o -> o.getNovelId().equals(novelId))
+                .orElseThrow(() -> new BizException(404, "大纲不存在", 404));
+    }
+
+    /** 按规划序号取该书的大纲行（正文生成时定位"本章规划"） */
+    private ChapterOutline findOutlineByOrder(Long novelId, int chapterOrder) {
+        return chapterOutlineRepository.findByNovelIdAndChapterOrder(novelId, chapterOrder).orElse(null);
     }
 
     private AiContext contextOf(Novel novel, String sourceText) {

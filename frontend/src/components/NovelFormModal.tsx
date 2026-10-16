@@ -43,6 +43,13 @@ export const LANGUAGE_STYLES = [
   '画面感强',
 ];
 
+/** 语言风格多选以「、」连接存储，AI 提示词可直接读作自然中文 */
+const STYLE_SEPARATOR = '、';
+export const styleToArray = (v?: string | null) =>
+  (v ?? '').split(STYLE_SEPARATOR).map((s) => s.trim()).filter(Boolean);
+export const styleToString = (v?: string[] | string | null) =>
+  (Array.isArray(v) ? v : styleToArray(v)).map((s) => s.trim()).filter(Boolean).join(STYLE_SEPARATOR);
+
 interface Props {
   open: boolean;
   editing: Novel | null;
@@ -58,8 +65,8 @@ export default function NovelFormModal({ open, editing, onClose, onSaved }: Prop
     if (open) {
       form.setFieldsValue(
         editing
-          ? { ...editing, genre: genreToArray(editing.genre), languageStyle: editing.languageStyle ? [editing.languageStyle] : undefined }
-          : { title: '', genre: ['玄幻'], description: '', targetWords: 500000, status: '草稿', languageStyle: undefined }
+          ? { ...editing, genre: genreToArray(editing.genre), languageStyle: styleToArray(editing.languageStyle) }
+          : { title: '', genre: ['玄幻'], description: '', targetWords: 500000, status: '草稿', languageStyle: [] }
       );
     }
   }, [open, editing, form]);
@@ -70,9 +77,7 @@ export default function NovelFormModal({ open, editing, onClose, onSaved }: Prop
       const payload = {
         ...values,
         genre: genreToString(values.genre),
-        languageStyle: Array.isArray(values.languageStyle)
-          ? values.languageStyle[0] ?? ""
-          : values.languageStyle ?? "",
+        languageStyle: styleToString(values.languageStyle),
       };
       const saved = editing
         ? await novelApi.update(editing.id, payload)
@@ -92,7 +97,7 @@ export default function NovelFormModal({ open, editing, onClose, onSaved }: Prop
       open={open}
       onCancel={onClose}
       footer={null}
-      destroyOnClose
+      destroyOnHidden
     >
       <Form form={form} layout="vertical" onFinish={onFinish} style={{ marginTop: 12 }}>
         <Form.Item
@@ -120,27 +125,28 @@ export default function NovelFormModal({ open, editing, onClose, onSaved }: Prop
             </Form.Item>
           )}
         </div>
-        <div style={{ display: 'flex', gap: 12 }}>
-          <Form.Item name="targetWords" label="目标字数" style={{ flex: 1 }}>
-            <InputNumber
-              style={{ width: '100%' }}
-              min={0}
-              step={100000}
-              formatter={(v) => `${v}`}
-              parser={(v) => Number(v ?? 0) as any}
-            />
-          </Form.Item>
-          <Form.Item name="languageStyle" label="语言风格" style={{ flex: 1 }}>
-            <Select
-              mode="tags"
-              maxCount={1}
-              allowClear
-              placeholder="选择或输入，如：轻松幽默"
-              options={LANGUAGE_STYLES.map((s) => ({ value: s, label: s }))}
-              tokenSeparators={[]}
-            />
-          </Form.Item>
-        </div>
+        <Form.Item name="targetWords" label="目标字数">
+          <InputNumber
+            style={{ width: '100%' }}
+            min={0}
+            step={100000}
+            formatter={(v) => `${v}`}
+            parser={(v) => Number(v ?? 0) as any}
+          />
+        </Form.Item>
+        <Form.Item
+          name="languageStyle"
+          label="语言风格"
+          tooltip="可多选，也可直接输入自定义文风描述（不限字数），输入后按回车添加"
+        >
+          <Select
+            mode="tags"
+            allowClear
+            placeholder="选择或输入，如：轻松幽默、多用短句少用形容词"
+            options={LANGUAGE_STYLES.map((s) => ({ value: s, label: s }))}
+            tokenSeparators={['、']}
+          />
+        </Form.Item>
         <Form.Item name="description" label="简介" rules={[{ max: 1000, message: '简介最长 1000 字' }]}>
           <Input.TextArea
             rows={4}

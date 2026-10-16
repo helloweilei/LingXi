@@ -33,6 +33,7 @@ public class MockLlmClient implements LlmClient {
             case CHAPTER_TITLE -> chapterTitle(ctx);
             case PROOFREAD -> proofread(ctx);
             case DEAI -> deAi(ctx);
+            case CHARACTER_RELATION -> characterRelations(ctx);
         };
         List<String> chunks = new ArrayList<>();
         int i = 0;
@@ -292,6 +293,34 @@ public class MockLlmClient implements LlmClient {
             found.add("{\"wrong\":\"急\",\"suggestion\":\"及\",\"type\":\"错别字\",\"reason\":\"「迫不及待」的「及」误写为「急」\"}");
         }
         return "[" + String.join(",", found) + "]";
+    }
+
+    /** 人物关系（示例引擎）：以首位角色为中心与其余角色各连一条，再把相邻配角两两串起 */
+    private String characterRelations(AiContext ctx) {
+        List<String> names = ctx.characterNames() == null ? List.of() : ctx.characterNames();
+        if (names.size() < 2) {
+            return "[]";
+        }
+        String[] leadLabels = {"挚友", "宿敌", "师徒", "暗恋", "盟友", "上下级"};
+        String[] peerLabels = {"同门", "对手", "合作"};
+        List<String> items = new ArrayList<>();
+        String lead = names.get(0);
+        for (int i = 1; i < names.size(); i++) {
+            items.add(relationJson(lead, names.get(i), leadLabels[(i - 1) % leadLabels.length]));
+        }
+        for (int i = 1; i + 1 < names.size(); i++) {
+            items.add(relationJson(names.get(i), names.get(i + 1), peerLabels[(i - 1) % peerLabels.length]));
+        }
+        return "[" + String.join(",", items) + "]";
+    }
+
+    private static String relationJson(String source, String target, String label) {
+        return "{\"source\":\"" + escape(source) + "\",\"target\":\"" + escape(target)
+                + "\",\"label\":\"" + label + "\"}";
+    }
+
+    private static String escape(String s) {
+        return s.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     private String guideProposals(AiContext ctx) {

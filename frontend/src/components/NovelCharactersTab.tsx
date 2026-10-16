@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { Button, Card, Col, Empty, Form, Input, Modal, Popconfirm, Row, Select, Spin, Tag, message } from "antd";
-import { DeleteOutlined, EditOutlined, PlusOutlined } from "@ant-design/icons";
+import { Button, Card, Col, Empty, Form, Input, Modal, Popconfirm, Row, Select, Space, Spin, Tag, message } from "antd";
+import { ApartmentOutlined, DeleteOutlined, EditOutlined, PlusOutlined } from "@ant-design/icons";
 import { characterApi } from "../api";
 import type { CharacterVO } from "../api/types";
+import CharacterGraphModal from "./CharacterGraphModal";
 
 const ROLE_COLOR: Record<string, string> = { 主角: "magenta", 配角: "blue", 反派: "red", 其他: "default" };
 
@@ -11,6 +12,7 @@ export default function CharactersTab({ novelId }: { novelId: number }) {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<CharacterVO | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [graphOpen, setGraphOpen] = useState(false);
   const [form] = Form.useForm();
 
   const load = useCallback(async () => {
@@ -60,13 +62,18 @@ export default function CharactersTab({ novelId }: { novelId: number }) {
         }}
       >
         <b>角色设定</b>
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => openModal(null)}
-        >
-          新增角色
-        </Button>
+        <Space>
+          <Button icon={<ApartmentOutlined />} onClick={() => setGraphOpen(true)}>
+            人物关系图谱
+          </Button>
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => openModal(null)}
+          >
+            新增角色
+          </Button>
+        </Space>
       </div>
       {loading ? (
         <Spin />
@@ -143,6 +150,12 @@ export default function CharactersTab({ novelId }: { novelId: number }) {
           </Form.Item>
         </Form>
       </Modal>
+      <CharacterGraphModal
+        open={graphOpen}
+        novelId={novelId}
+        characters={items}
+        onClose={() => setGraphOpen(false)}
+      />
     </div>
   );
 }

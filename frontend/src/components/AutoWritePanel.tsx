@@ -20,20 +20,7 @@ import {
 import { DeleteOutlined, PauseCircleOutlined, PlayCircleOutlined, RobotOutlined } from '@ant-design/icons';
 import { novelApi, taskApi } from '../api';
 import type { WritingTaskVO } from '../api/types';
-
-/** 可选语言风格（与作品编辑面板保持一致，支持自定义输入） */
-const LANGUAGE_STYLES = [
-  '现代白话',
-  '古典文风',
-  '轻松幽默',
-  '热血激昂',
-  '文艺唯美',
-  '悬疑冷峻',
-  '简洁干练',
-  '口语化',
-  '华丽辞藻',
-  '画面感强',
-];
+import { LANGUAGE_STYLES, styleToArray, styleToString } from './NovelFormModal';
 
 const STATUS_TAG: Record<string, { color: string; text: string }> = {
   QUEUED: { color: 'blue', text: '排队中' },
@@ -105,10 +92,8 @@ export default function AutoWritePanel({
     setStarting(true);
     try {
       // 语言风格作用于全书、且被 AI 提示词读取，因此保存到作品上（供后续所有生成沿用）
-      const style = Array.isArray(values.languageStyle)
-        ? values.languageStyle[0] ?? ''
-        : values.languageStyle ?? '';
-      if (style !== (languageStyle ?? '')) {
+      const style = styleToString(values.languageStyle);
+      if (style !== styleToString(languageStyle)) {
         await novelApi.update(novelId, { languageStyle: style });
         onStyleChange?.(style);
       }
@@ -195,7 +180,7 @@ export default function AutoWritePanel({
             chapters: 6,
             genOutline: true,
             autoOutline: true,
-            languageStyle: languageStyle ? [languageStyle] : [],
+            languageStyle: styleToArray(languageStyle),
           }}
           style={{ rowGap: 12 }}
         >
@@ -214,11 +199,12 @@ export default function AutoWritePanel({
           <Form.Item name="languageStyle" label="语言风格" tooltip="决定 AI 的用词、句式与叙述调性，全书统一生效">
             <Select
               mode="tags"
-              maxCount={1}
               allowClear
-              style={{ width: 160 }}
-              placeholder="选择或输入，如：轻松幽默"
+              style={{ minWidth: 220, maxWidth: 420 }}
+              maxTagCount="responsive"
+              placeholder="可多选或自定义输入，如：轻松幽默"
               options={LANGUAGE_STYLES.map((s) => ({ value: s, label: s }))}
+              tokenSeparators={['、']}
             />
           </Form.Item>
           <Form.Item name="genOutline" label="先生成大纲" valuePropName="checked">

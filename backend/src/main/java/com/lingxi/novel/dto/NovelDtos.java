@@ -16,7 +16,7 @@ public final class NovelDtos {
             @Size(max = 100) String genre,
             Integer targetWords,
             String coverColor,
-            @Size(max = 200, message = "语言风格最长 200 字") String languageStyle) {
+            String languageStyle) {
     }
 
     /**
@@ -36,7 +36,7 @@ public final class NovelDtos {
             @Size(max = 2000, message = "封面提示词最长 2000 字") String coverPrompt,
             @Size(max = 30, message = "作者名最长 30 字") String authorName,
             @Size(max = 30000) String outline,
-            @Size(max = 200, message = "语言风格最长 200 字") String languageStyle) {
+            String languageStyle) {
 
         public static Builder builder() {
             return new Builder();

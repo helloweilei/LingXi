@@ -2,6 +2,7 @@ package com.lingxi.novel;
 
 import com.lingxi.chapter.ChapterRepository;
 import com.lingxi.chapter.ChapterVersionRepository;
+import com.lingxi.character.CharacterRelationRepository;
 import com.lingxi.character.CharacterRepository;
 import com.lingxi.common.BizException;
 import com.lingxi.memory.ChapterOutlineRepository;
@@ -30,18 +31,21 @@ public class NovelService {
     private final ChapterRepository chapterRepository;
     private final ChapterVersionRepository chapterVersionRepository;
     private final CharacterRepository characterRepository;
+    private final CharacterRelationRepository characterRelationRepository;
     private final WorldSettingRepository worldSettingRepository;
     private final ChapterOutlineRepository chapterOutlineRepository;
     private final StoryMemoryRepository storyMemoryRepository;
 
     public NovelService(NovelRepository novelRepository, ChapterRepository chapterRepository,
                         ChapterVersionRepository chapterVersionRepository,
-                        CharacterRepository characterRepository, WorldSettingRepository worldSettingRepository,
+                        CharacterRepository characterRepository, CharacterRelationRepository characterRelationRepository,
+                        WorldSettingRepository worldSettingRepository,
                         ChapterOutlineRepository chapterOutlineRepository, StoryMemoryRepository storyMemoryRepository) {
         this.novelRepository = novelRepository;
         this.chapterRepository = chapterRepository;
         this.chapterVersionRepository = chapterVersionRepository;
         this.characterRepository = characterRepository;
+        this.characterRelationRepository = characterRelationRepository;
         this.worldSettingRepository = worldSettingRepository;
         this.chapterOutlineRepository = chapterOutlineRepository;
         this.storyMemoryRepository = storyMemoryRepository;
@@ -120,6 +124,7 @@ public class NovelService {
         if (!chapterIds.isEmpty()) {
             chapterVersionRepository.deleteByChapterIdIn(chapterIds);
         }
+        characterRelationRepository.deleteByNovelId(novelId);
         characterRepository.deleteByNovelId(novelId);
         worldSettingRepository.deleteByNovelId(novelId);
         chapterOutlineRepository.deleteByNovelId(novelId);

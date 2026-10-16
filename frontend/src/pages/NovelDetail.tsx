@@ -30,7 +30,7 @@ import NovelCharactersTab from "../components/NovelCharactersTab";
 import NovelChatTab from "../components/NovelChatTab";
 import NovelOutlinesTab from "../components/NovelOutlinesTab";
 import NovelWorldTab from "../components/NovelWorldTab";
-import NovelFormModal from "../components/NovelFormModal";
+import NovelFormModal, { styleToArray } from "../components/NovelFormModal";
 
 export default function NovelDetail() {
   const { id } = useParams();
@@ -112,9 +112,16 @@ export default function NovelDetail() {
                   </Tag>
                 ))}
               <Tag>{novel.status ?? "草稿"}</Tag>
-              {novel.languageStyle && (
-                <Tag color="cyan">{novel.languageStyle}</Tag>
-              )}
+              {styleToArray(novel.languageStyle).map((s, i) => (
+                <Tag
+                  key={i}
+                  color="cyan"
+                  title={s}
+                  style={{ maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", verticalAlign: "middle" }}
+                >
+                  {s}
+                </Tag>
+              ))}
               <Button
                 type="link"
                 icon={<EditOutlined />}

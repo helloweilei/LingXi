@@ -56,6 +56,14 @@ export interface CharacterVO {
   createdAt: string;
 }
 
+/** 人物关系：source → target 的有向关系 */
+export interface CharacterRelationVO {
+  id: number;
+  sourceId: number;
+  targetId: number;
+  label: string;
+}
+
 export interface WorldVO {
   id: number;
   novelId: number;

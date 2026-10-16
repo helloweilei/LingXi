@@ -61,8 +61,9 @@ public class Novel {
     @Column(name = "author_name", length = 30)
     private String authorName;
 
-    /** 语言风格（AI 写作文风约束），空/空串表示未设置 */
-    @Column(name = "language_style", length = 200)
+    /** 语言风格（AI 写作文风约束），多个风格以「、」连接；空/空串表示未设置 */
+    @Lob
+    @Column(name = "language_style")
     private String languageStyle;
 
     @Column(name = "created_at", nullable = false)

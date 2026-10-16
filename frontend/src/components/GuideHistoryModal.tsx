@@ -195,7 +195,7 @@ export default function GuideHistoryModal({
                 </Space>
               ),
               extra: (
-                <Space size={6}>
+                <Space size={6} onClick={(e) => e.stopPropagation()}>
                   <span className="muted" style={{ fontSize: 12 }}>
                     {dayjs(it.createdAt).format("YYYY-MM-DD HH:mm")}
                   </span>
@@ -212,7 +212,6 @@ export default function GuideHistoryModal({
                       size="small"
                       danger
                       icon={<DeleteOutlined />}
-                      onClick={(e) => e.stopPropagation()}
                     />
                   </Popconfirm>
                 </Space>

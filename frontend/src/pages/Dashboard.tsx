@@ -118,21 +118,20 @@ export default function Dashboard() {
                   </div>
                 }
                 actions={[
-                  <Popconfirm
-                    key="del"
-                    title={`确定删除《${n.title}》？`}
-                    description="章节与设定将一并删除，不可恢复"
-                    okText="删除"
-                    okButtonProps={{ danger: true }}
-                    onConfirm={() => removeNovel(n.id)}
-                  >
-                    <span
-                      onClick={(e) => e.stopPropagation()}
-                      style={{ color: '#9a9ab0' }}
+                  // 确认弹层渲染在 body 下，但 React 事件仍沿组件树冒泡到卡片 onClick，需在外层统一拦截
+                  <div key="del" onClick={(e) => e.stopPropagation()}>
+                    <Popconfirm
+                      title={`确定删除《${n.title}》？`}
+                      description="章节与设定将一并删除，不可恢复"
+                      okText="删除"
+                      okButtonProps={{ danger: true }}
+                      onConfirm={() => removeNovel(n.id)}
                     >
-                      <DeleteOutlined /> 删除
-                    </span>
-                  </Popconfirm>,
+                      <span style={{ color: '#9a9ab0' }}>
+                        <DeleteOutlined /> 删除
+                      </span>
+                    </Popconfirm>
+                  </div>,
                 ]}
               >
                 <Card.Meta

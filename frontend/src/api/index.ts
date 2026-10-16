@@ -1,4 +1,4 @@
-import { get, post, put, del } from './http';
+import http, { get, post, put, del } from './http';
 import type {
   AiConfigVO,
   AuthResp,
@@ -6,6 +6,7 @@ import type {
   ChapterMeta,
   ChapterOutlineItem,
   ChapterVersion,
+  CharacterRelationVO,
   CharacterVO,
   Novel,
   NovelDetail,
@@ -70,6 +71,18 @@ export const characterApi = {
   update: (id: number, req: { name: string; role?: string; description?: string }) =>
     put<CharacterVO>(`/characters/${id}`, req),
   remove: (id: number) => del(`/characters/${id}`),
+  relations: (novelId: number) => get<CharacterRelationVO[]>(`/novels/${novelId}/character-relations`),
+  createRelation: (novelId: number, req: { sourceId: number; targetId: number; label: string }) =>
+    post<CharacterRelationVO>(`/novels/${novelId}/character-relations`, req),
+  updateRelation: (id: number, req: { sourceId: number; targetId: number; label: string }) =>
+    put<CharacterRelationVO>(`/character-relations/${id}`, req),
+  removeRelation: (id: number) => del(`/character-relations/${id}`),
+  /** AI 推理人物关系并落库；replace 为 true 时覆盖已有关系。模型耗时较长，单独放宽超时 */
+  inferRelations: (novelId: number, replace: boolean) =>
+    http.post(`/novels/${novelId}/character-relations/infer`, null, {
+      params: { replace },
+      timeout: 200000,
+    }) as unknown as Promise<CharacterRelationVO[]>,
 };
 
 export const worldApi = {

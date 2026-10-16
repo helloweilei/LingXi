@@ -117,6 +117,12 @@ export const outlineApi = {
       `/novels/${novelId}/outlines/generate`,
       outlineIds ? { outlineIds } : {}
     ),
+  /**
+   * 只改章节名（不动大纲内容与字数）。
+   * 标题主场在章节大纲页；生成正文时会以这里的名字作为章节标题（单向同步）。
+   */
+  saveTitle: (novelId: number, outlineId: number, chapterTitle: string) =>
+    put<void>(`/novels/${novelId}/outlines/${outlineId}`, { chapterTitle }),
   /** 编辑一条规划；字段传 null 表示不改该字段。targetWords 传 null 表示沿用全书均摊值 */
   save: (
     novelId: number,
@@ -135,7 +141,11 @@ export const outlineApi = {
 
 /** 大纲批量生成任务：后台逐条执行，前端轮询进度，避免长任务触发 HTTP 超时 */
 export const outlineTaskApi = {
-  start: (novelId: number, req: { outlineIds?: number[] }) =>
+  /**
+   * chapters：全书还没有规划行时，先按数量创建规划行再逐章生成（一键从零规划）；
+   * 留空则只生成已有规划行中缺大纲内容的行。
+   */
+  start: (novelId: number, req: { outlineIds?: number[]; chapters?: number }) =>
     post<OutlineTaskVO>(`/novels/${novelId}/outline-tasks`, req),
   list: (novelId: number) => get<OutlineTaskVO[]>(`/novels/${novelId}/outline-tasks`),
   get: (taskId: number) => get<OutlineTaskVO>(`/outline-tasks/${taskId}`),

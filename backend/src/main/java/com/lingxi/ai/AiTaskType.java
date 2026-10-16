@@ -11,5 +11,7 @@ public enum AiTaskType {
     GUIDE_PROPOSAL,
     COVER_PROMPT,
     CHAPTER_TITLE,
-    PROOFREAD
+    PROOFREAD,
+    /** 去AI化：不改变语义，改写AI腔句子，让行文更自然、更有"人味" */
+    DEAI
 }

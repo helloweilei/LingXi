@@ -77,7 +77,8 @@ public class MemoryController {
 
     /**
      * 提交大纲批量生成任务（推荐）：后台线程池逐条生成，避免同步串行调用 LLM 触发 HTTP 超时。
-     * 仅对已存在的规划行生成内容，不会创建规划或章节。
+     * outlineIds 留空表示所有「大纲内容为空」的规划行；
+     * chapters 有值且全书还没有规划时，会先按数量补建规划行，实现一键从零规划全书。
      */
     @PostMapping("/api/novels/{novelId}/outline-tasks")
     public ApiResponse<TaskVO> startOutlineTask(@AuthenticationPrincipal User user, @PathVariable Long novelId,

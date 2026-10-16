@@ -183,6 +183,40 @@ public class AiService {
     }
 
     /**
+     * 去AI化：在**不改变语义**的前提下改写"AI腔"的句子，让行文更自然、更有"人味"。
+     * 与润色的分工：润色提升文笔与画面感；去AI化专攻"机器味"——套话、排比、解说腔、翻译腔、情绪贴标签。
+     */
+    public Flux<String> deAi(Long novelId, String text, User user) {
+        Novel novel = novelService.loadOwned(novelId, user);
+        String prompt = baseContext(novel) + "\n【原文】\n" + tail(text, 4000) + """
+
+                \n【任务】
+                请把以上文字改写成"真人写的小说"：语气自然、有细节、有呼吸感，读起来不像 AI 生成的。
+
+                【必须遵守】
+                1. 不改变任何语义：情节事实、人物行为、对话内容、信息量、时间顺序全部保持原样——只改"怎么说"，不改"说了什么"；
+                2. 保留人称视角，并遵循本书语言风格；
+                3. 对话内容原则上保留原意（可把极不自然的口语句式改顺，但不得改变台词含义与潜台词）。
+
+                【重点消除这些"AI腔"】
+                1. 空洞的总结句与解说腔（如"这一刻，他终于明白了……""这不仅仅是一场较量，更是一次蜕变"）；
+                2. 排比堆砌、四字成语连用、副词滥用（"缓缓地""轻轻地""深深地"满屏飞）；
+                3. 翻译腔与欧化长句（"他的眼睛深处闪过了一丝难以捉摸的情绪"式从句套从句）；
+                4. 情绪直说、给情绪贴标签（把"他很紧张"改成具体动作与生理反应；反之把堆砌的细节收拢成一句有力的白描）；
+                5. 机械过渡词（"与此同时""值得注意的是""总而言之""毋庸置疑"）；
+                6. 比喻滥用与"仿佛/似乎"疲劳，华而不实的环境描写。
+
+                【改写方向】
+                - 长短句交错，该断就断，别一口气说到底；
+                - 用动作、感官、细节呈现情绪，而不是给情绪贴标签；
+                - 保留网络小说该有的爽感与画面感，口语自然但不水。
+
+                只输出改写后的全文，不要解释，不要重复原文。
+                """;
+        return llm(user).stream(AiTaskType.DEAI, contextOf(novel, text), SYSTEM_PROMPT, prompt);
+    }
+
+    /**
      * 生成整章正文（写前规划 → 按本章大纲创作）。
      *
      * 语义澄清（重要）：
@@ -327,15 +361,28 @@ public class AiService {
     }
 
     /**
-     * 把一条规划落地为章节：已存在则复用，不存在则按规划序号/标题创建，并回填 outline.chapterId。
+     * 把一条规划落地为章节，并**把规划标题同步到章节**。
+     *
+     * 标题的权责划分（单向）：
+     * - 章节大纲是标题的主场——生成正文时以规划标题为准写入章节；
+     * - 章节内容页仍可独立改标题（改的是章节自身），但**不会反向回写大纲**。
+     * 因此「在正文页改名 → 再点生成正文」时，标题会以大纲为准；这是有意的单向同步。
+     *
      * 这是「章节由大纲生成」的唯一入口。
      */
     private Chapter landChapter(Novel novel, ChapterOutline outline, User user) {
+        String plannedTitle = isBlank(outline.getTitle()) ? null : outline.getTitle();
         if (outline.getChapterId() != null) {
             Chapter existing = chapterRepository.findById(outline.getChapterId())
                     .filter(c -> !c.isDeleted())
                     .orElse(null);
             if (existing != null) {
+                // 已落地过：仅在规划有标题且与章节不一致时同步标题，不动正文
+                if (plannedTitle != null && !plannedTitle.equals(existing.getTitle())) {
+                    return chapterRepository.findById(
+                            chapterService.save(existing.getId(), user,
+                                    new SaveReq(plannedTitle, existing.getContent(), null)).id()).orElseThrow();
+                }
                 return existing;
             }
         }
@@ -345,9 +392,8 @@ public class AiService {
         Chapter byOrder = chapterRepository
                 .findFirstByNovelIdAndDeletedFalseAndChapterOrder(novel.getId(), order)
                 .orElse(null);
-        String title = isBlank(outline.getTitle())
-                ? (byOrder == null ? null : byOrder.getTitle())
-                : outline.getTitle();
+        // 标题优先级：规划标题 > 已有章节标题 > 兜底占位名
+        String title = plannedTitle != null ? plannedTitle : (byOrder == null ? null : byOrder.getTitle());
         // ChapterService 返回的是 VO（视图对象），取回 id 后再取实体供后续使用
         Long chapterId = (byOrder != null)
                 ? chapterService.save(byOrder.getId(), user, new SaveReq(title, byOrder.getContent(), null)).id()

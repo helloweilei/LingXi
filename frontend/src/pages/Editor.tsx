@@ -9,6 +9,7 @@ import {
   RobotOutlined,
   SaveOutlined,
   ScanOutlined,
+  SmileOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router-dom';
 import dayjs from 'dayjs';
@@ -19,7 +20,7 @@ import AiDrawer from '../components/AiDrawer';
 import ProofreadPanel from '../components/ProofreadPanel';
 import VersionHistoryModal from '../components/VersionHistoryModal';
 
-type DrawerMode = 'continue' | 'polish' | 'expand';
+type DrawerMode = 'continue' | 'polish' | 'expand' | 'deai';
 
 export default function Editor() {
   const { chapterId } = useParams();
@@ -164,8 +165,10 @@ export default function Editor() {
     return true;
   };
 
-  const drawerTitle = { continue: 'AI 续写', polish: 'AI 润色', expand: 'AI 扩写' }[drawer ?? 'continue'];
-  const applyText = { continue: '插入到光标处', polish: '替换所选内容', expand: '替换所选内容' }[
+  const drawerTitle = { continue: 'AI 续写', polish: 'AI 润色', expand: 'AI 扩写', deai: 'AI 去AI化' }[
+    drawer ?? 'continue'
+  ];
+  const applyText = { continue: '插入到光标处', polish: '替换所选内容', expand: '替换所选内容', deai: '替换所选内容' }[
     drawer ?? 'continue'
   ];
 
@@ -177,17 +180,19 @@ export default function Editor() {
           icon={<ArrowLeftOutlined />}
           onClick={() => navigate(`/novel/${chapter?.novelId ?? ''}`)}
         />
-        <Input
-          value={title}
-          onChange={(e) => {
-            setTitle(e.target.value);
-            scheduleSave();
-          }}
-          variant="borderless"
-          style={{ fontSize: 17, fontWeight: 700, width: 360, color: '#33334a' }}
-          placeholder="章节名"
-          maxLength={120}
-        />
+        <Tooltip title="这里改名只影响本章，不回写章节大纲；若之后重新生成正文，章节标题会以「章节大纲」页的名字为准">
+          <Input
+            value={title}
+            onChange={(e) => {
+              setTitle(e.target.value);
+              scheduleSave();
+            }}
+            variant="borderless"
+            style={{ fontSize: 17, fontWeight: 700, width: 360, color: '#33334a' }}
+            placeholder="章节名"
+            maxLength={120}
+          />
+        </Tooltip>
         <span className="muted" style={{ fontSize: 13, minWidth: 120 }}>
           {saveState}
         </span>
@@ -214,6 +219,11 @@ export default function Editor() {
           <Button icon={<HighlightOutlined />} onClick={() => openAi('polish')}>
             润色
           </Button>
+          <Tooltip title="不改变语义，改写AI腔的句子：去掉套话、排比、解说腔与翻译腔，让行文更自然、更有“人味”（选中一段文字后使用）">
+            <Button icon={<SmileOutlined />} onClick={() => openAi('deai')}>
+              去AI化
+            </Button>
+          </Tooltip>
           <Button icon={<ExpandOutlined />} onClick={() => openAi('expand')}>
             扩写
           </Button>
@@ -238,7 +248,7 @@ export default function Editor() {
           onClick={(e: any) => {
             selRef.current = { start: e.target.selectionStart, end: e.target.selectionEnd };
           }}
-          placeholder={`开始写你的故事吧……\n\n· Ctrl+S 快速保存\n· 选中一段文字可使用“润色 / 扩写”\n· 卡文时点“AI 续写”，生成内容确认后才会插入正文`}
+          placeholder={`开始写你的故事吧……\n\n· Ctrl+S 快速保存\n· 选中一段文字可使用“润色 / 去AI化 / 扩写”\n· 卡文时点“AI 续写”，生成内容确认后才会插入正文`}
         />
       </div>
 
@@ -255,7 +265,9 @@ export default function Editor() {
                 ? `/api/ai/novels/${novel.id}/chapters/${cid}/continue`
                 : drawer === 'polish'
                   ? `/api/ai/novels/${novel.id}/polish`
-                  : `/api/ai/novels/${novel.id}/expand`;
+                  : drawer === 'deai'
+                    ? `/api/ai/novels/${novel.id}/deai`
+                    : `/api/ai/novels/${novel.id}/expand`;
             const body = drawer === 'continue' ? null : { text: selText };
             return streamSse(url, body, h);
           }}

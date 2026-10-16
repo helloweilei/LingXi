@@ -326,7 +326,7 @@ export default function Guide() {
                   }
                 >
                   {p.platform && (
-                    <Tag color="blue" style={{ marginBottom: 8 }}>
+                    <Tag color="blue" style={{ marginBottom: 8, whiteSpace: 'break-spaces' }}>
                       {p.platform}
                     </Tag>
                   )}

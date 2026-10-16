@@ -11,6 +11,7 @@ import com.lingxi.novel.Novel;
 import com.lingxi.novel.NovelService;
 import com.lingxi.user.User;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.HashSet;
@@ -156,6 +157,38 @@ public class MemoryService {
     }
 
     /**
+     * 确保全书至少有 chapters 条规划行：不存在的序号补建空规划（只建规划，不创建章节）。
+     * 供「一键生成大纲」在全书还没有任何规划时调用——先建行，再由任务逐条生成内容。
+     * REQUIRES_NEW：独立事务立即提交，保证后台任务线程随后能读到这些新行。
+     *
+     * @return 实际新建的规划行数
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public int ensurePlanRows(Long novelId, User user, int chapters) {
+        novelService.loadOwned(novelId, user);
+        List<ChapterOutline> existing = chapterOutlineRepository.findByNovelIdOrderByChapterOrderAsc(novelId);
+        if (existing.size() >= chapters) {
+            return 0;
+        }
+        Set<Integer> orders = existing.stream()
+                .map(ChapterOutline::getChapterOrder)
+                .collect(Collectors.toSet());
+        int created = 0;
+        for (int order = 1; order <= chapters && existing.size() + created < chapters; order++) {
+            if (orders.contains(order)) {
+                continue;
+            }
+            ChapterOutline o = new ChapterOutline();
+            o.setNovelId(novelId);
+            o.setChapterOrder(order);
+            o.setOutline("");
+            chapterOutlineRepository.save(o);
+            created++;
+        }
+        return created;
+    }
+
+    /**
      * 计算本次需要生成大纲内容的规划行（**只读已有规划，不创建任何东西**）。
      * 供同步生成（少量）与异步任务（批量）共用。
      *
@@ -175,15 +208,22 @@ public class MemoryService {
     /**
      * 同步生成大纲内容（仅适合少量，如单章重生成）。
      * 批量请走 OutlineTaskService 异步任务——每章一次 LLM 调用，串行阻塞会拖垮 HTTP 请求。
+     * 指定的规划行全部生成失败时抛出异常，避免前端误提示"已生成"。
      */
     @Transactional
     public List<OutlineItemVO> generate(Long novelId, User user, List<Long> outlineIds) {
-        for (ChapterOutline o : resolveTargetOutlines(novelId, user, outlineIds)) {
+        List<ChapterOutline> targets = resolveTargetOutlines(novelId, user, outlineIds);
+        int ok = 0;
+        for (ChapterOutline o : targets) {
             try {
                 aiService.generateChapterOutline(novelId, o.getId(), user).blockLast();
+                ok++;
             } catch (Exception ignored) {
                 // 单章生成失败：跳过，不阻塞其余章节
             }
+        }
+        if (!targets.isEmpty() && ok == 0) {
+            throw new BizException(502, "AI 生成失败，请检查 AI 配置或稍后重试", 502);
         }
         return outlines(novelId, user);
     }

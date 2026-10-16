@@ -28,15 +28,19 @@ import {
 import { useNavigate } from "react-router-dom";
 import { outlineApi, outlineTaskApi } from "../api";
 import { streamSse } from "../api/ai";
+import { copyText } from "../utils/clipboard";
 import type { ChapterOutlineItem, OutlineTaskVO } from "../api/types";
 
 const { Paragraph } = Typography;
 
 export default function OutlineTab({
   novelId,
+  targetWords,
   onChanged,
 }: {
   novelId: number;
+  /** 全书目标字数：用于估算「一键从零规划」的建议章节数 */
+  targetWords?: number | null;
   /** 正文/章节数据变化后通知父组件刷新字数统计与章节列表 */
   onChanged?: () => void;
 }) {
@@ -55,6 +59,10 @@ export default function OutlineTab({
   const [newOutline, setNewOutline] = useState("");
   const [newWords, setNewWords] = useState<number>(0);
   const [creating, setCreating] = useState(false);
+  // 章节名行内编辑：标题主场在本页，点击即可改（生成正文时同步到章节）
+  const [editingTitleId, setEditingTitleId] = useState<number | null>(null);
+  const [editingTitle, setEditingTitle] = useState("");
+  const [savingTitle, setSavingTitle] = useState(false);
   const [writeOpen, setWriteOpen] = useState(false);
   const [writeTitle, setWriteTitle] = useState("");
   const [writeText, setWriteText] = useState("");
@@ -67,6 +75,11 @@ export default function OutlineTab({
   const [editingWordsId, setEditingWordsId] = useState<number | null>(null);
   const [editingWords, setEditingWords] = useState<number>(0);
   const [savingWords, setSavingWords] = useState(false);
+  // 「一键从零规划」：全书还没有规划行时，先确认章节数，再由 AI 逐章规划
+  const [planOpen, setPlanOpen] = useState(false);
+  const [planChapters, setPlanChapters] = useState(10);
+  // 单章「生成/重生成」进行中的规划行 id：按钮 loading + 禁用其他生成入口，避免重复点击
+  const [generatingId, setGeneratingId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -123,8 +136,12 @@ export default function OutlineTab({
     [load, onChanged]
   );
 
-  /** 提交异步任务：后台逐条生成，不阻塞页面（仅对已存在的规划行生成内容，不创建规划/章节） */
-  const startTask = async (req: { outlineIds?: number[] }) => {
+  /**
+   * 提交异步任务：后台逐条生成，不阻塞页面。
+   * - chapters 有值：全书还没有规划行时，先按数量创建规划行再逐章生成（一键从零规划）；
+   * - 否则：仅对已存在的规划行生成内容，不创建规划/章节。
+   */
+  const startTask = async (req: { outlineIds?: number[]; chapters?: number }) => {
     try {
       const t = await outlineTaskApi.start(novelId, req);
       setTask(t);
@@ -147,13 +164,24 @@ export default function OutlineTab({
     }
   };
 
+  /** 建议规划章节数：按全书目标字数 ÷ 每章约 3000 字估算，夹在 1-100 */
+  const suggestedChapters = () => {
+    const t = targetWords ?? 0;
+    if (t <= 0) {
+      return 10;
+    }
+    return Math.min(100, Math.max(1, Math.ceil(t / 3000)));
+  };
+
   /** 一键生成大纲内容：为所有还没有大纲内容的规划行补全章节名与大纲 */
   const generateAll = () => {
-    if (running) {
+    if (running || generatingId !== null) {
       return;
     }
     if (items.length === 0) {
-      message.warning("还没有大纲规划，请先点「新增大纲」创建规划行");
+      // 全书还没有规划：让 AI 从零规划——先确认章节数（后端据此创建规划行），再逐章生成
+      setPlanChapters(suggestedChapters());
+      setPlanOpen(true);
       return;
     }
     if (missing === 0) {
@@ -163,8 +191,19 @@ export default function OutlineTab({
     void startTask({});
   };
 
-  /** 单条生成/重生成：走同步接口（一次调用，不会超时） */
+  /** 确认从零规划：按章节数创建规划行并逐章生成大纲（不生成正文） */
+  const confirmPlan = () => {
+    setPlanOpen(false);
+    void startTask({ chapters: planChapters });
+  };
+
+  /** 单条生成/重生成：走同步接口（一次调用，不会超时）。按钮有 loading，且禁用其他生成入口防重复点击 */
   const generateOne = async (outlineId: number) => {
+    if (generatingId !== null) {
+      return;
+    }
+    setGeneratingId(outlineId);
+    message.info("正在生成大纲，请稍候（约需十几秒）…");
     try {
       setItems(await outlineApi.generate(novelId, [outlineId]));
       message.success("大纲已生成");
@@ -172,6 +211,8 @@ export default function OutlineTab({
       onChanged?.();
     } catch (e: any) {
       message.error(e?.message ?? "生成失败");
+    } finally {
+      setGeneratingId(null);
     }
   };
 
@@ -217,6 +258,48 @@ export default function OutlineTab({
     }
   };
 
+  /** 开始编辑规划章节名 */
+  const startEditTitle = (item: ChapterOutlineItem) => {
+    setEditingTitleId(item.outlineId);
+    setEditingTitle(item.chapterTitle ?? "");
+  };
+
+  /**
+   * 保存规划章节名：只改大纲，不动已生成的章节正文。
+   * 下次生成正文时，章节标题会以这里的名字为准（单向同步）。
+   */
+  const commitTitle = async () => {
+    if (editingTitleId == null) {
+      return;
+    }
+    const item = items.find((x) => x.outlineId === editingTitleId);
+    if (!item) {
+      setEditingTitleId(null);
+      return;
+    }
+    const title = editingTitle.trim();
+    if (!title) {
+      message.warning("章节名不能为空（留空则由 AI 自动起名）");
+      return;
+    }
+    if (title === (item.chapterTitle ?? "")) {
+      setEditingTitleId(null);
+      return;
+    }
+    setSavingTitle(true);
+    try {
+      await outlineApi.saveTitle(novelId, item.outlineId, title);
+      message.success("章节名已更新（生成正文时会同步到章节）");
+      setEditingTitleId(null);
+      setItems(await outlineApi.list(novelId));
+      onChanged?.();
+    } catch (e: any) {
+      message.error(e?.message ?? "保存失败");
+    } finally {
+      setSavingTitle(false);
+    }
+  };
+
   /** 提交「新增大纲」：只建规划行，不创建章节；章节在生成正文时才落地 */
   const submitCreate = async () => {
     if (!newOutline.trim() && !newTitle.trim()) {
@@ -241,7 +324,7 @@ export default function OutlineTab({
     }
   };
 
-  /** 一键复制预览中的正文；navigator.clipboard 在非安全上下文不可用时降级为 execCommand */
+  /** 一键复制预览中的正文（剪贴板不可用时降级为 execCommand，见 utils/clipboard） */
   const copyWriteText = async () => {
     const text = writeText;
     if (!text.trim()) {
@@ -249,18 +332,7 @@ export default function OutlineTab({
       return;
     }
     try {
-      if (navigator.clipboard && window.isSecureContext) {
-        await navigator.clipboard.writeText(text);
-      } else {
-        const ta = document.createElement("textarea");
-        ta.value = text;
-        ta.style.position = "fixed";
-        ta.style.opacity = "0";
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand("copy");
-        document.body.removeChild(ta);
-      }
+      await copyText(text);
       message.success("正文已复制到剪贴板");
     } catch (e: any) {
       message.error("复制失败，请手动选中文本复制");
@@ -475,15 +547,17 @@ export default function OutlineTab({
               新增大纲
             </Button>
           </Tooltip>
-          <Button
-            type="primary"
-            icon={<RobotOutlined />}
-            loading={running}
-            disabled={running}
-            onClick={generateAll}
-          >
-            一键生成大纲{missing > 0 ? `（${missing} 条待生成）` : ""}
-          </Button>
+          <Tooltip title="由 AI 逐章规划全书（章节名 + 写作大纲）。还没有规划时会先按章节数创建规划行；每章一次 AI 调用，开始后可随时取消">
+            <Button
+              type="primary"
+              icon={<RobotOutlined />}
+              loading={running}
+              disabled={running || generatingId !== null}
+              onClick={generateAll}
+            >
+              一键生成大纲{missing > 0 ? `（${missing} 条待生成）` : ""}
+            </Button>
+          </Tooltip>
           <Tooltip
             title={
               hasOutlines
@@ -533,7 +607,7 @@ export default function OutlineTab({
       {loading ? (
         <Spin />
       ) : items.length === 0 ? (
-        <Empty description="还没有大纲规划。点「新增大纲」手动写一条，或点「一键生成大纲」由 AI 规划；正文会在你点「生成正文」时才生成对应章节。" />
+        <Empty description="还没有大纲规划。点「一键生成大纲」由 AI 直接规划全书（自动创建规划行），或点「新增大纲」手动写一条；正文会在你点「生成正文」时才生成对应章节。" />
       ) : (
         <Table
           rowKey="outlineId"
@@ -543,26 +617,70 @@ export default function OutlineTab({
             { title: "#", dataIndex: "chapterOrder", width: 60 },
             {
               title: (
-                <Tooltip title="规划章节名，可点「编辑」修改；留空时生成正文会自动采用大纲给出的名字">
+                <Tooltip title="章节名以本页为准：点击编辑图标即可修改，生成正文时会同步为章节标题。标题过长时会省略显示，悬浮可查看全文">
                   章节名
                 </Tooltip>
               ),
               dataIndex: "chapterTitle",
-              width: 150,
-              ellipsis: { showTitle: true },
-              render: (t: string | null, r: ChapterOutlineItem) => (
-                <span style={{ whiteSpace: "nowrap" }}>
-                  {t || (
-                    <span className="muted">
-                      第{r.chapterOrder}章{r.hasContent ? "（已生成正文）" : "（未命名）"}
-                    </span>
-                  )}
-                </span>
-              ),
+              width: 190,
+              render: (t: string | null, r: ChapterOutlineItem) => {
+                if (editingTitleId === r.outlineId) {
+                  return (
+                    <Space.Compact size="small">
+                      <Input
+                        size="small"
+                        maxLength={120}
+                        value={editingTitle}
+                        autoFocus
+                        onChange={(e) => setEditingTitle(e.target.value)}
+                        onPressEnter={() => commitTitle()}
+                        style={{ width: 112 }}
+                      />
+                      <Button size="small" type="primary" loading={savingTitle} onClick={() => commitTitle()}>
+                        保存
+                      </Button>
+                      <Button size="small" onClick={() => setEditingTitleId(null)}>
+                        取消
+                      </Button>
+                    </Space.Compact>
+                  );
+                }
+                const display = t || `第${r.chapterOrder}章${r.hasContent ? "（已生成）" : "（未命名）"}`;
+                // 长标题不截断溢出：超出列宽显示省略号，悬浮 Tooltip 展示全文
+                return (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6, maxWidth: "100%" }}>
+                    <Tooltip
+                      title={
+                        t
+                          ? `${display}${t.length > 12 ? "\n点击编辑图标可修改章节名；生成正文时会用这个名字作为章节标题" : ""}`
+                          : "尚未命名，点击编辑图标补充章节名"
+                      }
+                    >
+                      <a
+                        onClick={() => startEditTitle(r)}
+                        style={{
+                          minWidth: 0,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {t ? display : <span className="muted">{display}</span>}
+                      </a>
+                    </Tooltip>
+                    <Tooltip title="点击编辑章节名（生成正文时会同步为章节标题）">
+                      <EditOutlined
+                        style={{ color: "#1677ff", cursor: "pointer", flexShrink: 0 }}
+                        onClick={() => startEditTitle(r)}
+                      />
+                    </Tooltip>
+                  </span>
+                );
+              },
             },
             {
               title: (
-                <Tooltip title="点击可修改本章目标字数；默认 = 全书总目标字数 ÷ 章节数">
+                <Tooltip title="点击编辑图标可修改本章目标字数；默认 = 全书总目标字数 ÷ 章节数">
                   预计字数
                 </Tooltip>
               ),
@@ -599,17 +717,25 @@ export default function OutlineTab({
                 }
                 if (!w) {
                   return (
-                    <a onClick={() => startEditWords(r)}>
+                    <Space size={4}>
                       <span className="muted">—</span>
-                    </a>
+                      <Tooltip title="点击编辑图标单独设定本章目标字数">
+                        <EditOutlined
+                          style={{ color: "#1677ff", cursor: "pointer" }}
+                          onClick={() => startEditWords(r)}
+                        />
+                      </Tooltip>
+                    </Space>
                   );
                 }
                 return (
                   <Space size={4}>
-                    <Tooltip title={r.wordCountCustomized ? "本章单独设定，点击可修改" : "沿用全书均摊，点击可单独设定"}>
-                      <a onClick={() => startEditWords(r)}>
-                        {Math.round(w).toLocaleString()}
-                      </a>
+                    <span>{Math.round(w).toLocaleString()}</span>
+                    <Tooltip title={r.wordCountCustomized ? "本章单独设定，点击编辑图标可修改" : "沿用全书均摊，点击编辑图标可单独设定"}>
+                      <EditOutlined
+                        style={{ color: "#1677ff", cursor: "pointer" }}
+                        onClick={() => startEditWords(r)}
+                      />
                     </Tooltip>
                     {r.wordCountCustomized && (
                       <Tooltip title="恢复为全书均摊值">
@@ -649,6 +775,8 @@ export default function OutlineTab({
                     type="link"
                     size="small"
                     icon={<RobotOutlined />}
+                    loading={generatingId === r.outlineId}
+                    disabled={generatingId !== null}
                     onClick={() => generateOne(r.outlineId)}
                   >
                     {r.hasOutline ? "重生成" : "生成"}
@@ -796,6 +924,40 @@ export default function OutlineTab({
           style={{ fontFamily: "inherit" }}
           placeholder="（实时显示 AI 生成的正文）"
         />
+      </Modal>
+      {/* 一键从零规划：全书还没有规划行时，先确认章节数，再逐章生成大纲 */}
+      <Modal
+        title="AI 规划全书章节大纲"
+        open={planOpen}
+        onCancel={() => setPlanOpen(false)}
+        onOk={confirmPlan}
+        okText="开始规划"
+        confirmLoading={running}
+        width={520}
+        destroyOnClose
+      >
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 14 }}
+          message="将逐章生成「章节名 + 写作大纲」，并自动创建对应数量的规划行。"
+          description="不会生成正文；之后每章点「生成正文」才按规划写作。每章一次 AI 调用，章数越多耗时越久，开始后可随时取消。"
+        />
+        <div>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
+            规划章节数（按全书目标 {targetWords ? targetWords.toLocaleString() : 0} 字 ÷
+            每章约 3,000 字估算，可修改）
+          </div>
+          <InputNumber
+            min={1}
+            max={100}
+            step={1}
+            value={planChapters}
+            onChange={(v) => setPlanChapters(Number(v) || 1)}
+            style={{ width: 150 }}
+            addonAfter="章"
+          />
+        </div>
       </Modal>
       {/* 新增大纲：收集章节名 + 大纲内容 + 目标字数，提交后表格新增一行 */}
       <Modal

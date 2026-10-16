@@ -61,6 +61,13 @@ public class AiController {
         return SseStreams.toSse(aiService.polish(novelId, req.text(), user));
     }
 
+    /** 去AI化：不改变语义，改写AI腔句子，让行文更自然、更有"人味" */
+    @PostMapping(value = "/novels/{novelId}/deai", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<ServerSentEvent<String>> deai(@AuthenticationPrincipal User user, @PathVariable Long novelId,
+                                              @Valid @RequestBody TextReq req) {
+        return SseStreams.toSse(aiService.deAi(novelId, req.text(), user));
+    }
+
     @PostMapping(value = "/novels/{novelId}/expand", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<String>> expand(@AuthenticationPrincipal User user, @PathVariable Long novelId,
                                                 @Valid @RequestBody TextReq req) {

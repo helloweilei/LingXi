@@ -166,7 +166,11 @@ export default function NovelDetail() {
             key: "chapters",
             label: "章节内容",
             children: (
-              <NovelChaptersTab novelId={novelId} refreshKey={chapterRefresh} />
+              <NovelChaptersTab
+                novelId={novelId}
+                refreshKey={chapterRefresh}
+                totalWords={novel.wordCount ?? 0}
+              />
             ),
           },
           {
@@ -175,6 +179,7 @@ export default function NovelDetail() {
             children: (
               <NovelOutlinesTab
                 novelId={novelId}
+                targetWords={novel.targetWords ?? null}
                 onChanged={() => {
                   // 正文生成后同步刷新作品字数统计与章节列表
                   load();

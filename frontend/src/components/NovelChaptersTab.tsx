@@ -1,12 +1,22 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Key } from "react";
 import { Button, Empty, Input, Modal, Popconfirm, Space, Table, Tag, Tooltip, message } from "antd";
-import { DeleteOutlined, EditOutlined, FileAddOutlined, RobotOutlined } from "@ant-design/icons";
+import {
+  CopyOutlined,
+  DeleteOutlined,
+  EditOutlined,
+  FileAddOutlined,
+  RobotOutlined,
+} from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 import dayjs from "dayjs";
 import { chapterApi } from "../api";
 import { streamSse } from "../api/ai";
-import type { ChapterMeta } from "../api/types";
+import { copyText } from "../utils/clipboard";
+import type { Chapter, ChapterMeta } from "../api/types";
+
+/** 短篇小说阈值：总字数小于该值才提供「一键复制全文」 */
+const SHORT_NOVEL_MAX_WORDS = 30000;
 
 /** 是否为无信息量的占位章节名（这些才提示/允许 AI 命名） */
 function isPlaceholderTitle(t?: string | null): boolean {
@@ -15,12 +25,37 @@ function isPlaceholderTitle(t?: string | null): boolean {
   return /^第?\s*\d+\s*[章回节卷]?\s*[:：、.\s]*$/.test(s);
 }
 
+/** 阿拉伯数字转中文序号（支持到 9999）：1→一，10→十，11→十一，110→一百一十 */
+function cnNum(n: number): string {
+  const digits = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九"];
+  const units = ["", "十", "百", "千"];
+  const s = String(Math.max(0, Math.floor(n)));
+  let out = "";
+  for (let i = 0; i < s.length; i++) {
+    const pos = s.length - 1 - i;
+    const digit = Number(s[i]);
+    if (digit === 0) {
+      // 连续的零只保留一个；末尾的零不输出
+      if (pos !== 0 && !out.endsWith("零") && Number(s.slice(i)) !== 0) {
+        out += "零";
+      }
+      continue;
+    }
+    out += digits[digit] + units[pos];
+  }
+  // 10~19 按口语习惯作「十X」而非「一十X」
+  return out.replace(/^一十/, "十") || "零";
+}
+
 export default function ChaptersTab({
   novelId,
   refreshKey,
+  totalWords,
 }: {
   novelId: number;
   refreshKey: number;
+  /** 全书当前总字数（用于判断是否短篇小说、展示复制全文入口） */
+  totalWords?: number;
 }) {
   const navigate = useNavigate();
   const [chapters, setChapters] = useState<ChapterMeta[]>([]);
@@ -35,6 +70,8 @@ export default function ChaptersTab({
   const [editingTitle, setEditingTitle] = useState("");
   const [savingTitle, setSavingTitle] = useState(false);
   const [namingId, setNamingId] = useState<number | null>(null);
+  // 一键复制全文（逐章拉取正文中）
+  const [copying, setCopying] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -139,6 +176,44 @@ export default function ChaptersTab({
     }
   };
 
+  /**
+   * 一键复制全文（短篇小说用）：逐章拉取正文，按
+   * 「一、章节名\n正文」格式拼接后复制，方便整篇粘贴到投稿平台。
+   * 空章节跳过；任一章拉取失败即中止，避免复制到残缺内容。
+   */
+  const copyFullText = async () => {
+    if (chapters.length === 0) {
+      message.warning("还没有章节内容");
+      return;
+    }
+    setCopying(true);
+    message.info("正在读取全文…");
+    try {
+      const parts: string[] = [];
+      let words = 0;
+      for (const c of chapters) {
+        const full: Chapter = await chapterApi.get(c.id);
+        const body = (full.content ?? "").trim();
+        if (!body) {
+          continue;
+        }
+        words += body.replace(/\s/g, "").length;
+        const title = (full.title ?? "").trim() || `第${full.chapterOrder ?? c.chapterOrder}章`;
+        parts.push(`${cnNum(c.chapterOrder)}、${title}\n${body}`);
+      }
+      if (parts.length === 0) {
+        message.warning("章节都还没有正文，无可复制");
+        return;
+      }
+      await copyText(parts.join("\n\n"));
+      message.success(`已复制全文（${parts.length} 章 · ${words.toLocaleString()} 字）`);
+    } catch (e: any) {
+      message.error(e?.message ?? "读取全文失败，请重试");
+    } finally {
+      setCopying(false);
+    }
+  };
+
   return (
     <div className="section-card">
       <div
@@ -162,6 +237,13 @@ export default function ChaptersTab({
                 批量删除（{selectedKeys.length}）
               </Button>
             </Popconfirm>
+          )}
+          {(totalWords ?? 0) < SHORT_NOVEL_MAX_WORDS && (
+            <Tooltip title="短篇小说（3 万字以内）专属：按「一、章节名 + 正文」格式复制全文，可直接粘贴到投稿平台">
+              <Button icon={<CopyOutlined />} loading={copying} onClick={copyFullText}>
+                复制全文
+              </Button>
+            </Tooltip>
           )}
           <Button
             type="primary"

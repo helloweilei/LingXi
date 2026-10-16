@@ -32,6 +32,7 @@ public class MockLlmClient implements LlmClient {
             case COVER_PROMPT -> coverPrompt(ctx, userPrompt);
             case CHAPTER_TITLE -> chapterTitle(ctx);
             case PROOFREAD -> proofread(ctx);
+            case DEAI -> deAi(ctx);
         };
         List<String> chunks = new ArrayList<>();
         int i = 0;
@@ -195,6 +196,28 @@ public class MockLlmClient implements LlmClient {
         }
         sb.append("\n所有细碎的声响都退到了远处，只剩这一方天地，和天地间迟迟不肯落定的那一口气。");
         return sb.toString().trim();
+    }
+
+    /**
+     * 去AI化（示例引擎）：对源文本做最基础的"去套话"处理——
+     * 删高频AI腔词汇，长句拆分。接入真实模型后将逐句重写，保留语义只改说法。
+     */
+    private String deAi(AiContext ctx) {
+        String src = blank(ctx.sourceText())
+                ? "他推开那扇门，屋里很暗，有灰尘的味道。他的心跳得很快，额头上渗出了细密的汗珠，手指不自觉地攥紧了衣角。"
+                : ctx.sourceText().trim();
+        String out = src
+                .replace("仿佛", "像")
+                .replace("似乎", "好像")
+                .replace("骤然", "猛地")
+                .replace("缓缓", "慢慢")
+                .replace("不禁", "忍不住")
+                .replace("目光", "眼神")
+                .replace("在这一刻", "这时候")
+                .replace("与此同时，", "同时，")
+                .replace("值得注意的是，", "");
+        // 兜底：极端情况下替换后为空时保留原文，避免把用户文本改没
+        return out.isBlank() ? src : out.trim();
     }
 
     private String expand(AiContext ctx) {

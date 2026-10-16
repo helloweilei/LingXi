@@ -28,6 +28,8 @@ public class OutlineTaskService {
 
     private static final Logger log = LoggerFactory.getLogger(OutlineTaskService.class);
     private static final Duration COLLECT_TIMEOUT = Duration.ofMinutes(5);
+    /** 「一键从零规划」允许的最大章节数（每章一次 LLM 调用，需有上限保护） */
+    private static final int MAX_PLAN_CHAPTERS = 100;
     private static final List<OutlineTask.Status> ACTIVE = List.of(
             OutlineTask.Status.QUEUED, OutlineTask.Status.RUNNING);
 
@@ -53,21 +55,33 @@ public class OutlineTaskService {
         executor.shutdownNow();
     }
 
-    /** 提交批量生成大纲任务，立即返回（不阻塞调用方）。仅对已有规划行生成内容，不创建规划/章节。 */
+    /**
+     * 提交批量生成大纲任务，立即返回（不阻塞调用方）。
+     * - outlineIds 留空：生成所有「大纲内容为空」的规划行；
+     * - chapters 留空：仅处理已有规划行；
+     * - chapters 有值且全书还没有规划行：先按数量补建空规划行（立即提交），
+     *   实现「一键从零规划全书」——用户不必先手动新增规划。
+     */
     @Transactional
     public TaskVO start(Long novelId, User user, StartReq req) {
         // 校验属主（越权返回 404）
         memoryService.outlines(novelId, user);
         List<Long> ids = req == null ? null : req.outlineIds();
+        Integer chapters = req == null ? null : req.chapters();
+        boolean batch = ids == null || ids.isEmpty();
+        // 先查进行中任务再补建规划行，避免任务已在进行时产生副作用
+        if (taskRepository.existsByNovelIdAndStatusIn(novelId, ACTIVE)) {
+            throw new BizException(409, "该书已有进行中的大纲生成任务，请等待完成或先取消", 409);
+        }
+        if (batch && chapters != null && chapters > 0) {
+            memoryService.ensurePlanRows(novelId, user, Math.min(chapters, MAX_PLAN_CHAPTERS));
+        }
         if (memoryService.resolveTargetOutlines(novelId, user, ids).isEmpty()) {
             throw new BizException(400,
                     memoryService.hasOutline(novelId, user)
                             ? "所有大纲都已填写内容，无需重复生成"
-                            : "还没有大纲规划，请先点「新增大纲」或「一键生成大纲」创建规划行",
+                            : "还没有大纲规划：点「一键生成大纲」会由 AI 直接规划全书，也可以点「新增大纲」手动写一条",
                     400);
-        }
-        if (taskRepository.existsByNovelIdAndStatusIn(novelId, ACTIVE)) {
-            throw new BizException(409, "该书已有进行中的大纲生成任务，请等待完成或先取消", 409);
         }
         OutlineTask task = new OutlineTask();
         task.setNovelId(novelId);

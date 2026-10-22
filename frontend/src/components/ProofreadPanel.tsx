@@ -209,7 +209,7 @@ export default function ProofreadPanel({
           <Button onClick={onClose}>关闭</Button>
         </Space>
       }
-      destroyOnClose
+      destroyOnHidden
     >
       {loading ? (
         <div style={{ padding: "20px 0" }}>

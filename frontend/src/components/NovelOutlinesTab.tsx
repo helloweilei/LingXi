@@ -934,7 +934,7 @@ export default function OutlineTab({
         okText="开始规划"
         confirmLoading={running}
         width={520}
-        destroyOnClose
+        destroyOnHidden
       >
         <Alert
           type="info"
@@ -968,7 +968,7 @@ export default function OutlineTab({
         okText="新增"
         confirmLoading={creating}
         width={720}
-        destroyOnClose
+        destroyOnHidden
       >
         <Alert
           type="info"
@@ -1035,7 +1035,7 @@ export default function OutlineTab({
         okText="保存"
         confirmLoading={saving}
         width={720}
-        destroyOnClose
+        destroyOnHidden
       >
         <Alert
           type="info"

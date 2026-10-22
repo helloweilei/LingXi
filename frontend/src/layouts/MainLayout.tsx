@@ -1,17 +1,19 @@
 import { useEffect, useState } from 'react';
 import { Outlet, useNavigate } from 'react-router-dom';
 import { Avatar, Button, Dropdown, Tag, Tooltip, message } from 'antd';
-import { EditOutlined, LogoutOutlined, SettingOutlined, UserOutlined } from '@ant-design/icons';
+import { AudioOutlined, EditOutlined, LogoutOutlined, SettingOutlined, UserOutlined } from '@ant-design/icons';
 import { useAuth } from '../store/auth';
 import { authApi, aiApi } from '../api';
 import { get } from '../api/http';
 import type { UserVO } from '../api/types';
 import ModelSettingsModal from '../components/ModelSettingsModal';
+import SpeechSettingsModal from '../components/SpeechSettingsModal';
 
 export default function MainLayout() {
   const navigate = useNavigate();
   const { user, token, setUser, logout } = useAuth();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [speechOpen, setSpeechOpen] = useState(false);
   const [statusKey, setStatusKey] = useState(0);
 
   useEffect(() => {
@@ -34,6 +36,8 @@ export default function MainLayout() {
       navigate('/login');
     } else if (key === 'settings') {
       setSettingsOpen(true);
+    } else if (key === 'speech') {
+      setSpeechOpen(true);
     }
   };
 
@@ -55,6 +59,7 @@ export default function MainLayout() {
             menu={{
               items: [
                 { key: 'settings', icon: <SettingOutlined />, label: '模型配置' },
+                { key: 'speech', icon: <AudioOutlined />, label: '语音服务' },
                 { type: 'divider' },
                 { key: 'logout', icon: <LogoutOutlined />, label: '退出登录' },
               ],
@@ -74,6 +79,7 @@ export default function MainLayout() {
         onClose={() => setSettingsOpen(false)}
         onSaved={() => setStatusKey((k) => k + 1)}
       />
+      <SpeechSettingsModal open={speechOpen} onClose={() => setSpeechOpen(false)} />
     </div>
   );
 }

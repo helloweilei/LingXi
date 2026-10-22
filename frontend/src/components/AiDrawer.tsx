@@ -82,7 +82,7 @@ export default function AiDrawer({ open, onClose, title, run, applyText, onApply
         onClose();
       }}
       width={460}
-      destroyOnClose
+      destroyOnHidden
       extra={
         status === 'streaming' ? (
           <Button size="small" onClick={stop}>

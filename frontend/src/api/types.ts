@@ -56,6 +56,18 @@ export interface CharacterVO {
   createdAt: string;
 }
 
+/** 语音识别服务：browser = 浏览器自带；xfyun = 科大讯飞；aliyun = 阿里云百炼 */
+export type SpeechProvider = 'browser' | 'xfyun' | 'aliyun';
+
+export interface SpeechConfigVO {
+  provider: SpeechProvider;
+  appId: string;
+  apiKeyMask: string;
+  hasKey: boolean;
+  hasSecret: boolean;
+  updatedAt: string | null;
+}
+
 /** 人物关系：source → target 的有向关系 */
 export interface CharacterRelationVO {
   id: number;

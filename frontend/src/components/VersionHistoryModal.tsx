@@ -153,7 +153,7 @@ export default function VersionHistoryModal({
         onCancel={onClose}
         width={680}
         footer={<Button onClick={onClose}>关闭</Button>}
-        destroyOnClose
+        destroyOnHidden
       >
         <Alert
           type="info"
@@ -299,7 +299,7 @@ export default function VersionHistoryModal({
             )}
           </Space>
         }
-        destroyOnClose
+        destroyOnHidden
       >
         {preview && (
           <>

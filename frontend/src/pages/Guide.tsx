@@ -16,6 +16,7 @@ import {
 import { guideApi } from '../api/guide';
 import type { Question, Proposal, GuideState } from '../api/guide';
 import GuideChat from '../components/GuideChat';
+import VoiceInputButton from '../components/VoiceInputButton';
 
 const { Paragraph, Text } = Typography;
 
@@ -231,9 +232,12 @@ export default function Guide() {
                 value={seedText}
                 onChange={(e) => setSeedText(e.target.value)}
               />
-              <Button type="primary" style={{ marginTop: 12 }} loading={busy} onClick={beginSeed}>
-                用这个想法开始
-              </Button>
+              <Space style={{ marginTop: 12 }} wrap>
+                <Button type="primary" loading={busy} onClick={beginSeed}>
+                  用这个想法开始
+                </Button>
+                <VoiceInputButton onText={(t) => setSeedText((prev) => prev + t)} disabled={busy} />
+              </Space>
             </Card>
           </Col>
         </Row>

@@ -8,6 +8,8 @@ import type {
   ChapterVersion,
   CharacterRelationVO,
   CharacterVO,
+  SpeechConfigVO,
+  SpeechProvider,
   Novel,
   NovelDetail,
   OutlineTaskVO,
@@ -83,6 +85,18 @@ export const characterApi = {
       params: { replace },
       timeout: 200000,
     }) as unknown as Promise<CharacterRelationVO[]>,
+};
+
+export const speechApi = {
+  getConfig: () => get<SpeechConfigVO>('/speech/config'),
+  saveConfig: (req: { provider: SpeechProvider; appId?: string; apiKey?: string; apiSecret?: string }) =>
+    put<SpeechConfigVO>('/speech/config', req),
+  /** 上传 16kHz / 16bit / 单声道 PCM，由后端调用用户配置的云服务识别 */
+  recognize: (pcm: ArrayBuffer) =>
+    http.post('/speech/recognize', pcm, {
+      headers: { 'Content-Type': 'application/octet-stream' },
+      timeout: 90000,
+    }) as unknown as Promise<{ text: string }>,
 };
 
 export const worldApi = {

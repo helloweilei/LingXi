@@ -128,7 +128,7 @@ export default function GuideHistoryModal({
       onCancel={onClose}
       footer={<Button onClick={onClose}>关闭</Button>}
       width={880}
-      destroyOnClose
+      destroyOnHidden
     >
       <Alert
         type="info"

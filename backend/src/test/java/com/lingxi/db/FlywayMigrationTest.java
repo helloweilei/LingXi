@@ -43,13 +43,14 @@ class FlywayMigrationTest {
             List<String> tables = new ArrayList<>();
             try (ResultSet rs = st.executeQuery(
                     "select table_name from information_schema.tables where lower(table_name) in "
-                            + "('users','novels','chapters','chapter_versions','chapter_summaries','story_memories')")) {
+                            + "('users','novels','chapters','chapter_versions','chapter_outlines','story_memories')")) {
                 while (rs.next()) {
                     tables.add(rs.getString(1).toLowerCase());
                 }
             }
+            // V8 起 chapter_summaries 已更名为 chapter_outlines（大纲先行模型）
             assertThat(tables).contains("users", "novels", "chapters",
-                    "chapter_versions", "chapter_summaries", "story_memories");
+                    "chapter_versions", "chapter_outlines", "story_memories");
 
             // 章节软删除列存在
             boolean hasDeleted = false;

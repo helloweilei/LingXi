@@ -15,8 +15,8 @@ import { streamSse } from "../api/ai";
 import { copyText } from "../utils/clipboard";
 import type { Chapter, ChapterMeta } from "../api/types";
 
-/** 短篇小说阈值：总字数小于该值才提供「一键复制全文」 */
-const SHORT_NOVEL_MAX_WORDS = 30000;
+/** 一键复制全文的字数上限：全书总字数超过该值时禁用按钮，避免超大文本导致剪贴板失败或浏览器卡顿 */
+const COPY_FULL_MAX_WORDS = 100000;
 
 /** 是否为无信息量的占位章节名（这些才提示/允许 AI 命名） */
 function isPlaceholderTitle(t?: string | null): boolean {
@@ -54,7 +54,7 @@ export default function ChaptersTab({
 }: {
   novelId: number;
   refreshKey: number;
-  /** 全书当前总字数（用于判断是否短篇小说、展示复制全文入口） */
+  /** 全书当前总字数（超过上限时禁用「复制全文」） */
   totalWords?: number;
 }) {
   const navigate = useNavigate();
@@ -72,6 +72,11 @@ export default function ChaptersTab({
   const [namingId, setNamingId] = useState<number | null>(null);
   // 一键复制全文（逐章拉取正文中）
   const [copying, setCopying] = useState(false);
+  /** 复制全文禁用条件：全书总字数超上限（超限时复制易失败/卡顿） */
+  const copyFullDisabled = (totalWords ?? 0) > COPY_FULL_MAX_WORDS;
+  const copyFullTip = copyFullDisabled
+    ? `全书总字数超过 ${COPY_FULL_MAX_WORDS.toLocaleString()} 字，内容过大已禁用，请分卷或分段复制`
+    : "按「一、章节名 + 正文」格式复制全书全文，可直接粘贴到投稿平台";
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -238,13 +243,19 @@ export default function ChaptersTab({
               </Button>
             </Popconfirm>
           )}
-          {(totalWords ?? 0) < SHORT_NOVEL_MAX_WORDS && (
-            <Tooltip title="短篇小说（3 万字以内）专属：按「一、章节名 + 正文」格式复制全文，可直接粘贴到投稿平台">
-              <Button icon={<CopyOutlined />} loading={copying} onClick={copyFullText}>
+          <Tooltip title={copyFullTip}>
+            {/* span 包裹：disabled 按钮不派发鼠标事件，包一层才能正常显示禁用原因 */}
+            <span style={{ display: "inline-block" }}>
+              <Button
+                icon={<CopyOutlined />}
+                loading={copying}
+                disabled={copyFullDisabled}
+                onClick={copyFullText}
+              >
                 复制全文
               </Button>
-            </Tooltip>
-          )}
+            </span>
+          </Tooltip>
           <Button
             type="primary"
             icon={<FileAddOutlined />}

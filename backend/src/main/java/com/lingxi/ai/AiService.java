@@ -49,11 +49,11 @@ public class AiService {
     private final ContextBuilder contextBuilder;
 
     public AiService(LlmClientProvider llmClientProvider, NovelService novelService,
-                     ChapterRepository chapterRepository, ChapterService chapterService,
-                     CharacterRepository characterRepository,
-                     WorldSettingRepository worldSettingRepository,
-                     ChapterOutlineRepository chapterOutlineRepository, StoryMemoryRepository storyMemoryRepository,
-                     ContextBuilder contextBuilder) {
+            ChapterRepository chapterRepository, ChapterService chapterService,
+            CharacterRepository characterRepository,
+            WorldSettingRepository worldSettingRepository,
+            ChapterOutlineRepository chapterOutlineRepository, StoryMemoryRepository storyMemoryRepository,
+            ContextBuilder contextBuilder) {
         this.llmClientProvider = llmClientProvider;
         this.novelService = novelService;
         this.chapterRepository = chapterRepository;
@@ -221,14 +221,14 @@ public class AiService {
      *
      * 语义澄清（重要）：
      * - 默认（appendExisting=false）：**整章重写**，忽略本章已有正文，从上一章结尾重新开始写。
-     *   「生成正文」按钮走这条——用户点它的意图是"重新生成这一章"，而不是"接着上次继续"。
+     * 「生成正文」按钮走这条——用户点它的意图是"重新生成这一章"，而不是"接着上次继续"。
      * - appendExisting=true：把本章已有内容的尾部作为上下文，让 AI 从断点**续写**（只增不重）。
-     *   「从当前内容接着写」入口走这条。
+     * 「从当前内容接着写」入口走这条。
      *
      * @param totalChapters 全书总章节数（用于判断本章是否为终章）；为 null 时按已存在章节数推断
      */
     public Flux<String> writeChapter(Long novelId, Long chapterId, User user, Integer totalChapters,
-                                     boolean appendExisting) {
+            boolean appendExisting) {
         Novel novel = novelService.loadOwned(novelId, user);
         int targetWords = perChapterTargetWords(novel, chapterId);
         Chapter chapter = loadChapter(novelId, chapterId);
@@ -318,7 +318,8 @@ public class AiService {
                 本章必须**一次性写完并写完整**：结尾必须收束完整，绝不能停在半句话或未完成的场景上。
                 """.formatted(targetWords));
         prompt.append("\n只输出正文，不要输出标题、序号、解释或字数说明。");
-        return llm(user).stream(AiTaskType.WRITE_CHAPTER, contextOf(novel, chapter.getContent()), SYSTEM_PROMPT, prompt.toString());
+        return llm(user).stream(AiTaskType.WRITE_CHAPTER, contextOf(novel, chapter.getContent()), SYSTEM_PROMPT,
+                prompt.toString());
     }
 
     /**
@@ -329,7 +330,7 @@ public class AiService {
      * 再把正文写入；已生成过则按语义覆盖或追加，并自动留版本快照可回滚。
      */
     public Flux<String> writeChapterAndSave(Long novelId, Long outlineId, User user, Integer totalChapters,
-                                            boolean appendExisting) {
+            boolean appendExisting) {
         Novel novel = novelService.loadOwned(novelId, user);
         ChapterOutline outline = loadOutline(novelId, outlineId);
         // 规划 → 章节：没有章节就在此刻落地创建
@@ -381,7 +382,8 @@ public class AiService {
                 if (plannedTitle != null && !plannedTitle.equals(existing.getTitle())) {
                     return chapterRepository.findById(
                             chapterService.save(existing.getId(), user,
-                                    new SaveReq(plannedTitle, existing.getContent(), null)).id()).orElseThrow();
+                                    new SaveReq(plannedTitle, existing.getContent(), null)).id())
+                            .orElseThrow();
                 }
                 return existing;
             }
@@ -515,10 +517,58 @@ public class AiService {
      * 流式完成后持久化；中途取消/失败不落库。
      */
     public Flux<String> generateChapterOutline(Long novelId, Long outlineId, User user) {
+        return generateChapterOutline(novelId, outlineId, user, null);
+    }
+
+    /**
+     * 同上，但可显式指定全书总章节数（用于识别最后一章，走完结规划）。
+     * 自动创作流水线边建规划行边生成，必须显式传入，否则无法识别终章；
+     * 留空时按已有规划行数推断（大纲先行模型下二者一致）。
+     */
+    public Flux<String> generateChapterOutline(Long novelId, Long outlineId, User user, Integer totalChapters) {
         Novel novel = novelService.loadOwned(novelId, user);
         ChapterOutline outline = loadOutline(novelId, outlineId);
-        StringBuilder prompt = new StringBuilder(contextBuilder.buildNovelInfo(novel))
-                .append("\n【当前要规划的章节】第").append(outline.getChapterOrder()).append("章");
+        // 全书总章节数：显式传入优先；否则以规划行数为准（大纲先行，章节由规划落地）
+        int total = totalChapters != null && totalChapters > 0
+                ? totalChapters
+                : chapterOutlineRepository.findByNovelIdOrderByChapterOrderAsc(novel.getId()).size();
+        boolean isFinalChapter = isFinalPlannedChapter(outline, total);
+        // 该规划若已落地章节，带着已有正文让规划更贴合
+        String existingContent = null;
+        Long chapterId = outline.getChapterId();
+        if (chapterId != null) {
+            Chapter landed = chapterRepository.findById(chapterId).orElse(null);
+            if (landed != null && !isBlank(landed.getContent())) {
+                existingContent = landed.getContent();
+            }
+        }
+        String prompt = buildChapterOutlinePrompt(novel, outline, isFinalChapter, existingContent);
+        StringBuilder acc = new StringBuilder();
+        return llm(user).stream(AiTaskType.CHAPTER_OUTLINE, contextOf(novel, existingContent),
+                SYSTEM_PROMPT, prompt)
+                .doOnNext(acc::append)
+                .doOnComplete(() -> persistOutlineAndTitle(novel, outline, acc.toString().trim(), user));
+    }
+
+    /**
+     * 章节大纲 prompt 组装（抽成包级可见便于单测固化关键约束）。
+     *
+     * 历史 bug 修复：全书大纲（novel.outline，含结局/完结描述）**必须**进 prompt。
+     * 此前 prompt 只带「作品信息」，却要求模型“与全书大纲方向一致”——模型根本看不到大纲，
+     * 导致一键生成的最后一章大纲没有任何完结规划。
+     */
+    String buildChapterOutlinePrompt(Novel novel, ChapterOutline outline, boolean isFinalChapter,
+            String existingContent) {
+        StringBuilder prompt = new StringBuilder(contextBuilder.buildNovelInfo(novel));
+        // 全书大纲：主线走向与结局规划的唯一来源；取尾部（结局/完结描述一般在文末）
+        if (!isBlank(novel.getOutline())) {
+            prompt.append("\n【全书大纲（全书主线走向与结局规划，本章规划必须严格遵循）】\n")
+                    .append(tail(novel.getOutline(), BOOK_OUTLINE_TAIL_CHARS)).append("\n");
+        }
+        prompt.append("\n【当前要规划的章节】第").append(outline.getChapterOrder()).append("章");
+        if (isFinalChapter) {
+            prompt.append("（全书最后一章）");
+        }
         if (!isBlank(outline.getTitle())) {
             prompt.append("（已拟定章节名：").append(outline.getTitle()).append("）");
         }
@@ -527,15 +577,9 @@ public class AiService {
             prompt.append("（已有大纲草稿，可据此补全细化）\n【已有草稿】\n")
                     .append(tail(outline.getOutline(), 2000)).append("\n");
         }
-        // 该规划若已落地章节，带着已有正文让规划更贴合
-        String existingContent = null;
-        if (outline.getChapterId() != null) {
-            Chapter landed = chapterRepository.findById(outline.getChapterId()).orElse(null);
-            if (landed != null && !isBlank(landed.getContent())) {
-                existingContent = landed.getContent();
-                prompt.append("【该章已有正文（规划须与已写内容一致）】\n")
-                        .append(tail(existingContent, 2000)).append("\n");
-            }
+        if (!isBlank(existingContent)) {
+            prompt.append("【该章已有正文（规划须与已写内容一致）】\n")
+                    .append(tail(existingContent, 2000)).append("\n");
         }
         prompt.append("\n【文风要求】\n").append(styleDirective(novel));
         prompt.append("""
@@ -549,8 +593,21 @@ public class AiService {
                 1. 用 3-6 个要点列出本章的场景节拍与关键情节推进；
                 2. 点明本章要完成的人物状态变化或关系进展；
                 3. 明确写出“本章主要矛盾的阶段性结果”（如何解决 / 失败 / 反转）——本章情节必须在此闭合，不能悬而未决；
-                4. 在上述结果之后，再为下一章留一个自然的悬念或期待（钩子），不得用钩子代替本章的收束；
-                5. 确保与全书大纲的方向一致，避免偏离主线、尾大不掉。
+                4. 本章若不是全书最后一章：在上述结果之后，再为下一章留一个自然的悬念或期待（钩子），不得用钩子代替本章的收束；
+                5. 严格遵循上方“全书大纲”：本章的情节推进必须落在主线走向上，不得偏离主线、不得尾大不掉。
+                """);
+        if (isFinalChapter) {
+            prompt.append("""
+
+                    【本章是全书最后一章：完结规划（最高优先级）】
+                    本章大纲必须收束全书，并依据全书大纲中的结局/完结部分进行规划：
+                    1. 全书核心矛盾与主线悬念在此章给出最终结果或答案；
+                    2. 主要人物的处境、关系与成长弧光有明确归宿；
+                    3. 呼应前文关键伏笔，让读者感到故事完整地结束，而非戛然而止；
+                    4. 严禁再预留引向下一章的钩子或开放式收尾。
+                    """);
+        }
+        prompt.append("""
 
                 【章节名要求】
                 - 必须是**具体、贴合本章核心事件**的标题（如「雨夜惊变」「她终于开了口」「F级异能的代价」），
@@ -560,11 +617,13 @@ public class AiService {
 
                 只输出上述格式内容，不要写正文，不要额外解释。
                 """);
-        StringBuilder acc = new StringBuilder();
-        return llm(user).stream(AiTaskType.CHAPTER_OUTLINE, contextOf(novel, existingContent),
-                        SYSTEM_PROMPT, prompt.toString())
-                .doOnNext(acc::append)
-                .doOnComplete(() -> persistOutlineAndTitle(novel, outline, acc.toString().trim(), user));
+        return prompt.toString();
+    }
+
+    /** 是否为全书最后一章的规划：规划序号不小于全书总章节数即为终章 */
+    static boolean isFinalPlannedChapter(ChapterOutline outline, int totalChapters) {
+        return outline != null && outline.getChapterOrder() != null
+                && totalChapters > 0 && outline.getChapterOrder() >= totalChapters;
     }
 
     /**
@@ -648,8 +707,8 @@ public class AiService {
     }
 
     /** 章节名输出行：`章节名：xxx` */
-    private static final java.util.regex.Pattern TITLE_PATTERN =
-            java.util.regex.Pattern.compile("^\\s*(?:章节名|标题)\\s*[:：]\\s*(.+?)\\s*$", java.util.regex.Pattern.MULTILINE);
+    private static final java.util.regex.Pattern TITLE_PATTERN = java.util.regex.Pattern
+            .compile("^\\s*(?:章节名|标题)\\s*[:：]\\s*(.+?)\\s*$", java.util.regex.Pattern.MULTILINE);
 
     /** 去除标题中的书名号/序号/尾部标点，并做长度兜底 */
     static String normalizeTitle(String s) {
@@ -657,7 +716,7 @@ public class AiService {
             return null;
         }
         String t = s.replaceAll("[《》「」『』\"'“”‘’]", "")
-                .replaceAll("^第\\s*\\d+\\s*章[：:、.\\s]*", "")
+                .replaceAll("^第\\s*[\\d〇零一二三四五六七八九十百千万]+\\s*[章回节卷][：:、.\\s]*", "")
                 .replaceAll("[。．.，,、；;：:\\s]+$", "")
                 .trim();
         if (t.isEmpty()) {
@@ -758,6 +817,8 @@ public class AiService {
 
     /** 上一章结尾注入的字符数：越大越连贯，但会挤压本章可用上下文 */
     private static final int PREV_TAIL_CHARS = 2000;
+    /** 章节大纲 prompt 中全书大纲的截取长度：取尾部，保住结局/完结描述 */
+    private static final int BOOK_OUTLINE_TAIL_CHARS = 2500;
     /** 前文大纲概览最多回溯几章 */
     private static final int RECENT_OUTLINE_CHAPTERS = 3;
     private static final int RECENT_OUTLINE_CHARS = 260;

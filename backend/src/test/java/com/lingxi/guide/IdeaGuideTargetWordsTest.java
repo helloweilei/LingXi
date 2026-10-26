@@ -21,8 +21,9 @@ class IdeaGuideTargetWordsTest {
 
     @Test
     void plainNumberIsTakenAsWords() {
-        // 无单位时按字面理解
-        assertEquals(8_000, IdeaGuideService.deriveTarget("8000字"));
+        // 无单位时按字面理解；低于 1 万下限会被收敛到 1 万（见 outOfRangeIsClamped）
+        assertEquals(15_000, IdeaGuideService.deriveTarget("15000字"));
+        assertEquals(10_000, IdeaGuideService.deriveTarget("8000字"));
     }
 
     @Test

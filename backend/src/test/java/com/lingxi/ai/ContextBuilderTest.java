@@ -73,7 +73,7 @@ class ContextBuilderTest {
                 count++;
             }
         }
-        assertThat(count).isEqualTo(props.getMaxRecentOutlines());
+        assertThat(count).isEqualTo(props.getMaxRecentSummaries());
     }
 
     @Test

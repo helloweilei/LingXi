@@ -212,7 +212,8 @@ public class AutoWriteService {
                 // 若开启 autoOutline，先为本条规划产出章节名与大纲内容，
                 // 随后写正文会严格按此规划施工，避免跑偏、收尾失控。
                 if (p.autoOutline) {
-                    collect(aiService.generateChapterOutline(novel.getId(), outlineId, user));
+                    // 显式传入总章节数：流水线边建规划行边生成，仅靠行数无法识别最后一章
+                    collect(aiService.generateChapterOutline(novel.getId(), outlineId, user, p.chapters));
                 }
                 // 生成整章正文（内部会落地章节、写入正文、并对截断自动续写）；空响应自动重试
                 String content = null;

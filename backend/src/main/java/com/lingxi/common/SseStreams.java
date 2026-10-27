@@ -16,6 +16,7 @@ public final class SseStreams {
     private SseStreams() {
     }
 
+    @SuppressWarnings("null")
     public static Flux<ServerSentEvent<String>> toSse(Flux<String> deltas) {
         return deltas.map(t -> ServerSentEvent.<String>builder(t).event("delta").build())
                 .concatWith(Mono.just(ServerSentEvent.<String>builder("").event("done").build()))

@@ -13,6 +13,10 @@ public interface ChapterOutlineRepository extends JpaRepository<ChapterOutline, 
     /** 按规划序号定位一行（生成正文时据此落地章节 / 追加规划） */
     Optional<ChapterOutline> findByNovelIdAndChapterOrder(Long novelId, Integer chapterOrder);
 
+    /** 上一行规划（序号小于当前章的最大序号行）：生成本章大纲时承接上一章；序号允许有缺口 */
+    Optional<ChapterOutline> findTopByNovelIdAndChapterOrderLessThanOrderByChapterOrderDesc(
+            Long novelId, Integer chapterOrder);
+
     /** 该书最后一个规划序号，用于新增大纲时接续编号；无大纲返回空 */
     Optional<ChapterOutline> findTopByNovelIdOrderByChapterOrderDesc(Long novelId);
 

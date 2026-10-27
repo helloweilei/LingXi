@@ -371,6 +371,7 @@ public class AiService {
      *
      * 这是「章节由大纲生成」的唯一入口。
      */
+    @SuppressWarnings("null")
     private Chapter landChapter(Novel novel, ChapterOutline outline, User user) {
         String plannedTitle = isBlank(outline.getTitle()) ? null : outline.getTitle();
         if (outline.getChapterId() != null) {
@@ -542,7 +543,8 @@ public class AiService {
                 existingContent = landed.getContent();
             }
         }
-        String prompt = buildChapterOutlinePrompt(novel, outline, isFinalChapter, existingContent);
+        String prompt = buildChapterOutlinePrompt(novel, outline, isFinalChapter, existingContent,
+                previousOutlineText(novel.getId(), outline.getChapterOrder()));
         StringBuilder acc = new StringBuilder();
         return llm(user).stream(AiTaskType.CHAPTER_OUTLINE, contextOf(novel, existingContent),
                 SYSTEM_PROMPT, prompt)
@@ -556,14 +558,22 @@ public class AiService {
      * 历史 bug 修复：全书大纲（novel.outline，含结局/完结描述）**必须**进 prompt。
      * 此前 prompt 只带「作品信息」，却要求模型“与全书大纲方向一致”——模型根本看不到大纲，
      * 导致一键生成的最后一章大纲没有任何完结规划。
+     *
+     * 上一章大纲（prevOutlineText）同样必须进 prompt：章节是连续叙事，不知道上一章
+     * 发生了什么，生成的规划就容易重复已写事件、丢掉上文悬念，或与上文状态断裂。
      */
     String buildChapterOutlinePrompt(Novel novel, ChapterOutline outline, boolean isFinalChapter,
-            String existingContent) {
+            String existingContent, String prevOutlineText) {
         StringBuilder prompt = new StringBuilder(contextBuilder.buildNovelInfo(novel));
         // 全书大纲：主线走向与结局规划的唯一来源；取尾部（结局/完结描述一般在文末）
         if (!isBlank(novel.getOutline())) {
             prompt.append("\n【全书大纲（全书主线走向与结局规划，本章规划必须严格遵循）】\n")
                     .append(tail(novel.getOutline(), BOOK_OUTLINE_TAIL_CHARS)).append("\n");
+        }
+        // 上一章大纲：连续叙事的直接上文，本章必须承接（第一章无上一章，自然缺省）
+        if (!isBlank(prevOutlineText)) {
+            prompt.append("\n【上一章大纲（本章的直接上文：承接其结局状态，不得重复或断裂）】\n")
+                    .append(tail(prevOutlineText, PREV_OUTLINE_TAIL_CHARS)).append("\n");
         }
         prompt.append("\n【当前要规划的章节】第").append(outline.getChapterOrder()).append("章");
         if (isFinalChapter) {
@@ -596,6 +606,16 @@ public class AiService {
                 4. 本章若不是全书最后一章：在上述结果之后，再为下一章留一个自然的悬念或期待（钩子），不得用钩子代替本章的收束；
                 5. 严格遵循上方“全书大纲”：本章的情节推进必须落在主线走向上，不得偏离主线、不得尾大不掉。
                 """);
+        if (!isBlank(prevOutlineText)) {
+            prompt.append("""
+
+                    【衔接要求（对照上方“上一章大纲”执行）】
+                    1. 从上一章结束时的时点、地点、人物处境与情绪直接接续，不得重新开场、不得另起炉灶；
+                    2. 上一章已经发生并已有结果的事件不得重复规划；上一章留下的悬念、冲突或未完成的动作，本章必须给出推进或回应；
+                    3. 人物状态、相互关系与已披露信息须与上一章保持一致，不得前后矛盾；
+                    4. 章节名不得与上一章标题雷同。
+                    """);
+        }
         if (isFinalChapter) {
             prompt.append("""
 
@@ -672,6 +692,7 @@ public class AiService {
      * 解析 AI 输出（章节名 + 大纲）并分别落库到这条**规划行**上。
      * 解析失败时按纯大纲处理（兼容旧格式），不影响大纲功能。
      */
+    @SuppressWarnings("null")
     private void persistOutlineAndTitle(Novel novel, ChapterOutline outline, String raw, User user) {
         if (raw == null || raw.isBlank()) {
             return;
@@ -817,6 +838,8 @@ public class AiService {
 
     /** 上一章结尾注入的字符数：越大越连贯，但会挤压本章可用上下文 */
     private static final int PREV_TAIL_CHARS = 2000;
+    /** 章节大纲 prompt 中上一章大纲的截取长度：与正文生成「上一章大纲」的口径保持一致 */
+    private static final int PREV_OUTLINE_TAIL_CHARS = 900;
     /** 章节大纲 prompt 中全书大纲的截取长度：取尾部，保住结局/完结描述 */
     private static final int BOOK_OUTLINE_TAIL_CHARS = 2500;
     /** 前文大纲概览最多回溯几章 */
@@ -827,6 +850,7 @@ public class AiService {
      * 注入前若干章的大纲概览（不含本章与上一章）：维持长线主线、人物状态与未回收伏笔的一致性，
      * 避免"每章像另起炉灶"。按章序倒序收集，再正序输出。
      */
+    @SuppressWarnings("null")
     private void appendRecentOutlinesBrief(StringBuilder prompt, Long novelId, int currentOrder) {
         // 前文概览直接取规划行（章节可能尚未生成，但规划已定）
         List<ChapterOutline> prior = chapterOutlineRepository.findByNovelIdOrderByChapterOrderAsc(novelId).stream()
@@ -895,12 +919,14 @@ public class AiService {
         return Math.min(words, MAX_CHAPTER_WORDS);
     }
 
+    @SuppressWarnings("null")
     private Chapter loadChapter(Long novelId, Long chapterId) {
         return chapterRepository.findById(chapterId)
                 .filter(c -> c.getNovelId().equals(novelId) && !c.isDeleted())
                 .orElseThrow(() -> new BizException(404, "章节不存在", 404));
     }
 
+    @SuppressWarnings("null")
     /** 加载一条大纲规划行（含属主校验，越权返回 404） */
     private ChapterOutline loadOutline(Long novelId, Long outlineId) {
         return chapterOutlineRepository.findById(outlineId)
@@ -913,6 +939,23 @@ public class AiService {
         return chapterOutlineRepository.findByNovelIdAndChapterOrder(novelId, chapterOrder).orElse(null);
     }
 
+    /**
+     * 上一章（规划序号小于当前章的最大序号行）的大纲文本；无上一章或其内容为空时返回 null。
+     * 序号允许有缺口（删除过规划行时，取实际存在的上一行，而非刻板的 order-1）。
+     */
+    @SuppressWarnings("null")
+    String previousOutlineText(Long novelId, Integer chapterOrder) {
+        if (novelId == null || chapterOrder == null) {
+            return null;
+        }
+        return chapterOutlineRepository
+                .findTopByNovelIdAndChapterOrderLessThanOrderByChapterOrderDesc(novelId, chapterOrder)
+                .map(ChapterOutline::getOutline)
+                .filter(o -> !isBlank(o))
+                .orElse(null);
+    }
+
+    @SuppressWarnings("null")
     private AiContext contextOf(Novel novel, String sourceText) {
         List<String> names = characterRepository.findByNovelIdOrderByCreatedAtAscIdAsc(novel.getId())
                 .stream().map(NovelCharacter::getName).toList();

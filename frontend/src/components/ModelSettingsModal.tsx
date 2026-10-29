@@ -99,14 +99,14 @@ export default function ModelSettingsModal({ open, onClose, onSaved }: Props) {
         type="info"
         showIcon
         style={{ marginBottom: 16 }}
-        message="接入你自己的 API Key（如 DeepSeek），配置只对当前账号生效。未配置时使用内置示例引擎。"
+        message="优先接入你自己的 API Key（如 DeepSeek），配置只对当前账号生效；暂不配置可使用内置示例引擎。"
       />
-      <Form form={form} layout="vertical" initialValues={{ provider: 'mock' }}>
+      <Form form={form} layout="vertical" initialValues={{ provider: 'openai' }}>
         <Form.Item name="provider" label="模型提供方" rules={[{ required: true }]}>
           <Select
             options={[
-              { value: 'mock', label: '内置示例引擎（无需配置）' },
-              { value: 'openai', label: 'OpenAI 兼容 API（DeepSeek / 通义 / Kimi 等）' },
+              { value: 'openai', label: 'OpenAI 兼容 API（DeepSeek / 通义 / Kimi 等）— 推荐' },
+              { value: 'mock', label: '内置示例引擎（无需配置，仅作体验兜底）' },
             ]}
           />
         </Form.Item>

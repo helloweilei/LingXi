@@ -8,7 +8,6 @@ import com.lingxi.user.User;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import reactor.core.publisher.Flux;
 
 import java.time.Duration;
 import java.util.List;
@@ -28,11 +27,11 @@ public class AiConfigService {
         this.llmClientProvider = llmClientProvider;
     }
 
-    /** 读取当前用户配置（apiKey 只回显掩码） */
+    /** 读取当前用户配置（apiKey 只回显掩码）。未配置过的用户默认引导选择真实引擎，示例引擎仅作兜底 */
     public ConfigVO get(User user) {
         AiConfig c = aiConfigRepository.findByUserId(user.getId()).orElse(null);
         if (c == null) {
-            return new ConfigVO("mock", "", "", "", false, null);
+            return new ConfigVO("openai", "https://api.deepseek.com/v1", "deepseek-chat", "", false, null);
         }
         return toVo(c);
     }
@@ -45,7 +44,7 @@ public class AiConfigService {
                 throw new BizException(400, "接入真实模型需填写接口地址与模型名", 400);
             }
             String oldKey = aiConfigRepository.findByUserId(user.getId())
-                    .map(AiConfig::getApiKey).orElse("");
+                    .map(config -> config.getApiKey()).orElse("");
             if (isBlank(req.apiKey()) && isBlank(oldKey)) {
                 throw new BizException(400, "请填写 API Key（首次配置必填）", 400);
             }
@@ -75,9 +74,9 @@ public class AiConfigService {
         StringBuilder acc = new StringBuilder();
         try {
             String result = client.stream(
-                            AiTaskType.CHAT,
-                            new AiContext("连通性测试", "", List.of(), "ping"),
-                            SYSTEM_PING, "ping")
+                    AiTaskType.CHAT,
+                    new AiContext("连通性测试", "", List.of(), "ping"),
+                    SYSTEM_PING, "ping")
                     .doOnNext(acc::append)
                     .blockLast(Duration.ofSeconds(30));
             long latency = System.currentTimeMillis() - start;

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Button, Card, Col, Empty, Modal, Popconfirm, Row, Space, Statistic, Tag, message } from 'antd';
-import { BulbOutlined, DeleteOutlined, HistoryOutlined, PlusOutlined } from '@ant-design/icons';
+import { BulbOutlined, DeleteOutlined, HistoryOutlined, PlusOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
 import { novelApi } from '../api';
@@ -60,6 +60,18 @@ export default function Dashboard() {
           <Button icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
             新建作品
           </Button>
+          <Button
+            type="primary"
+            icon={<ThunderboltOutlined />}
+            onClick={() => navigate('/assistant')}
+            style={{
+              background: 'linear-gradient(135deg, #6a5acd, #9d7bde)',
+              border: 'none',
+              boxShadow: '0 2px 10px rgba(106, 90, 205, 0.35)',
+            }}
+          >
+            创作助手
+          </Button>
           <Button type="primary" icon={<BulbOutlined />} onClick={() => navigate('/guide')}>
             灵感启发
           </Button>
@@ -93,6 +105,9 @@ export default function Dashboard() {
             <Space direction="vertical">
               <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
                 创作第一本书
+              </Button>
+              <Button icon={<ThunderboltOutlined />} onClick={() => navigate('/assistant')}>
+                和创作助手聊聊想法
               </Button>
               <Button icon={<BulbOutlined />} onClick={() => navigate('/guide')}>
                 用灵感启发开始

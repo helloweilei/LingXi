@@ -36,11 +36,12 @@ lingxi:
     secret: ${LINGXI_JWT_SECRET:lingxi-creation-jwt-secret-2026-please-change-me-0123456789abcdef}
     expire-hours: 72
   ai:
-    # mock = 内置离线示例引擎（无需 API Key）；openai = 任意 OpenAI 兼容接口（DeepSeek/通义/Kimi 等）
-    provider: mock
-    base-url: https://api.deepseek.com/v1
-    api-key: ""
-    model: deepseek-chat
+    # 真实引擎优先：配置 LINGXI_AI_API_KEY（可选 LINGXI_AI_BASE_URL / LINGXI_AI_MODEL / LINGXI_AI_PROVIDER
+    # 覆盖以下默认值）即自动启用 OpenAI 兼容真实引擎；未配置 Key 时自动回退内置示例引擎（mock）
+    provider: ${LINGXI_AI_PROVIDER:openai}
+    base-url: ${LINGXI_AI_BASE_URL:https://api.deepseek.com/v1}
+    api-key: ${LINGXI_AI_API_KEY:}
+    model: ${LINGXI_AI_MODEL:deepseek-chat}
     temperature: 0.8
     connect-timeout-seconds: 15
     read-timeout-seconds: 180

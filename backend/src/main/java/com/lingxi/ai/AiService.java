@@ -10,20 +10,29 @@ import com.lingxi.character.NovelCharacter;
 import com.lingxi.common.BizException;
 import com.lingxi.memory.ChapterOutline;
 import com.lingxi.memory.ChapterOutlineRepository;
+import com.lingxi.memory.Foreshadowing;
+import com.lingxi.memory.ForeshadowingRepository;
 import com.lingxi.memory.StoryMemory;
 import com.lingxi.memory.StoryMemoryRepository;
+import com.lingxi.memory.dto.MemoryDtos.ForeshadowNewVO;
+import com.lingxi.memory.dto.MemoryDtos.ForeshadowResolvedVO;
+import com.lingxi.memory.dto.MemoryDtos.ForeshadowSuggestVO;
 import com.lingxi.novel.Novel;
 import com.lingxi.novel.NovelService;
 import com.lingxi.user.User;
 import com.lingxi.world.WorldSetting;
 import com.lingxi.world.WorldSettingRepository;
+import com.fasterxml.jackson.databind.JsonNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 @Service
 public class AiService {
@@ -46,6 +55,8 @@ public class AiService {
     private final WorldSettingRepository worldSettingRepository;
     private final ChapterOutlineRepository chapterOutlineRepository;
     private final StoryMemoryRepository storyMemoryRepository;
+    private final VideoPromptRepository videoPromptRepository;
+    private final ForeshadowingRepository foreshadowingRepository;
     private final ContextBuilder contextBuilder;
 
     public AiService(LlmClientProvider llmClientProvider, NovelService novelService,
@@ -53,6 +64,7 @@ public class AiService {
             CharacterRepository characterRepository,
             WorldSettingRepository worldSettingRepository,
             ChapterOutlineRepository chapterOutlineRepository, StoryMemoryRepository storyMemoryRepository,
+            VideoPromptRepository videoPromptRepository, ForeshadowingRepository foreshadowingRepository,
             ContextBuilder contextBuilder) {
         this.llmClientProvider = llmClientProvider;
         this.novelService = novelService;
@@ -62,6 +74,8 @@ public class AiService {
         this.worldSettingRepository = worldSettingRepository;
         this.chapterOutlineRepository = chapterOutlineRepository;
         this.storyMemoryRepository = storyMemoryRepository;
+        this.videoPromptRepository = videoPromptRepository;
+        this.foreshadowingRepository = foreshadowingRepository;
         this.contextBuilder = contextBuilder;
     }
 
@@ -140,6 +154,198 @@ public class AiService {
                 只输出提示词正文，不要解释、不要标题层级以外的附加说明。
                 """);
         return llm(user).stream(AiTaskType.COVER_PROMPT, contextOf(novel, null), SYSTEM_PROMPT, prompt.toString());
+    }
+
+    /**
+     * 生成“文生视频”提示词（阶段一：只产出提示词，不调用视频模型；用户复制后粘贴到即梦/可灵/Runway 等平台）。
+     * 两种模式：chapterId 非空 → 单章分镜（3-6 个镜头）；为空 → 全书宣传片（15-30 秒、4-6 个镜头）。
+     * 核心设计：画风/色调与角色外貌作为“锚点”单独成块、并要求逐镜头逐字复用——
+     * 这是缓解文生视频跨镜头人物漂移（变脸/换装）的通行手段，锚点信息来自角色与世界观设定。
+     */
+    public Flux<String> videoPrompt(Long novelId, Long chapterId, User user) {
+        Novel novel = novelService.loadOwned(novelId, user);
+        List<NovelCharacter> characters = characterRepository.findByNovelIdOrderByCreatedAtAscIdAsc(novel.getId());
+        List<WorldSetting> worlds = worldSettingRepository.findByNovelIdOrderByCreatedAtAscIdAsc(novel.getId());
+        StringBuilder prompt = new StringBuilder(contextBuilder.buildNovelInfo(novel))
+                .append("\n\n").append(contextBuilder.buildConsistencyCard(characters, worlds));
+        if (chapterId != null) {
+            Chapter chapter = loadChapter(novelId, chapterId);
+            prompt.append("\n【本章正文（分镜的唯一情节来源）】\n")
+                    .append("第").append(chapter.getChapterOrder()).append("章 ")
+                    .append(chapter.getTitle() == null ? "" : chapter.getTitle()).append("\n")
+                    .append(tail(chapter.getContent(), 4000)).append("\n");
+            appendStoryboardTask(prompt);
+        } else {
+            String outline = novel.getOutline();
+            if (outline != null && !outline.isBlank()) {
+                prompt.append("\n【全书大纲（宣传片镜头的唯一情节来源）】\n").append(tail(outline, 2500)).append("\n");
+            }
+            appendTrailerTask(prompt, novel.getTitle());
+        }
+        appendVideoOutputSpec(prompt);
+        String mode = chapterId != null ? "storyboard" : "trailer";
+        StringBuilder acc = new StringBuilder();
+        return llm(user).stream(AiTaskType.VIDEO_PROMPT, contextOf(novel, null), SYSTEM_PROMPT, prompt.toString())
+                .doOnNext(acc::append)
+                .doOnComplete(() -> persistVideoPrompt(novel.getId(), chapterId, mode, acc.toString().trim()));
+    }
+
+    /**
+     * 独立工作台的「粘贴外部文本」模式：不依赖数据库中的作品与章节，
+     * 直接对用户粘贴的章节正文生成视频提示词。无角色/世界观设定表，
+     * 风格与角色锚点由 AI 从正文自行提炼；结果**不落库**（无属主实体），由用户自行复制保存。
+     *
+     * @param bookName   书名（可选，用于宣传片末镜头字幕；缺省按「未命名作品」处理）
+     * @param content    用户粘贴的章节/情节文本，至少 50 字，取尾部 8000 字
+     * @param storyboard true=单章分镜（3-6 镜头）；false=宣传片（15-30 秒）
+     */
+    public Flux<String> videoPromptAdhoc(User user, String bookName, String content, boolean storyboard) {
+        String text = content == null ? "" : content.trim();
+        if (text.length() < ADHOC_MIN_CHARS) {
+            throw new BizException(400, "请粘贴至少 " + ADHOC_MIN_CHARS + " 字的章节内容再生成", 400);
+        }
+        String name = isBlank(bookName) ? "未命名作品" : tail(bookName.trim(), 60);
+        StringBuilder prompt = new StringBuilder()
+                .append("【作品信息】\n书名：").append(name)
+                .append("\n（以下为用户外部粘贴的文本，平台内没有该作品的更多设定资料；")
+                .append("【风格锚点】与【角色锚点】请依据正文内容自行提炼，并保持逐镜头一致）\n");
+        if (storyboard) {
+            prompt.append("\n【章节正文（分镜的唯一情节来源）】\n").append(tail(text, ADHOC_CONTENT_TAIL_CHARS))
+                    .append("\n");
+            appendStoryboardTask(prompt);
+        } else {
+            prompt.append("\n【情节材料（宣传片镜头的唯一来源）】\n").append(tail(text, ADHOC_CONTENT_TAIL_CHARS))
+                    .append("\n");
+            appendTrailerTask(prompt, name);
+        }
+        appendVideoOutputSpec(prompt);
+        return llm(user).stream(AiTaskType.VIDEO_PROMPT,
+                new AiContext(name, null, List.of(), tail(text, 1500)), SYSTEM_PROMPT, prompt.toString());
+    }
+
+    /** 粘贴文本的最短长度：太短不足以支撑分镜 */
+    private static final int ADHOC_MIN_CHARS = 50;
+    /** 粘贴文本注入 prompt 的最大长度 */
+    private static final int ADHOC_CONTENT_TAIL_CHARS = 8000;
+
+    /** 单章分镜任务块（情节材料由调用方前置给出） */
+    private static void appendStoryboardTask(StringBuilder prompt) {
+        prompt.append("""
+
+                【任务】
+                请把这一章拆解为 3-6 个视频分镜。要求：
+                1. 首个镜头建立本章场景，末个镜头留在悬念或情绪高点；
+                2. 每个镜头是 5-10 秒的独立画面，镜头间情节连贯，覆盖本章的关键节拍；
+                3. 只改编“看得见的东西”，对话可转成动作与表情，禁止大段旁白。
+                """);
+    }
+
+    /** 全书宣传片任务块 */
+    private static void appendTrailerTask(StringBuilder prompt, String bookTitle) {
+        prompt.append("""
+
+                【任务】
+                请为这部小说设计一支 15-30 秒的宣传片（trailer）分镜。要求：
+                1. 4-6 个镜头，总时长控制在 15-30 秒，节奏由缓到急；
+                2. 突出核心悬念、冲突与爽点，不剧透结局；
+                3. 末个镜头留一个强钩子，并提示书名「%s」以字幕形式浮现。
+                """.formatted(bookTitle));
+    }
+
+    /** 视频提示词的统一输出格式与输出要求（两种模式、两种来源共用） */
+    private static void appendVideoOutputSpec(StringBuilder prompt) {
+        prompt.append("""
+
+                【输出格式（必须严格遵守，便于逐镜头复制到视频生成平台）】
+                【风格锚点】
+                画风：……（电影写实 / 二次元动画 / 国风水墨 / 赛博朋克……贴合本书题材）
+                年代与场景基调：……
+                色调与光线：……
+                画幅：16:9 横屏
+
+                【角色锚点】（每个出场角色一段；所有镜头必须逐字复用，禁止变脸/换装式漂移）
+                角色名：性别年龄段，发型发色，服装，显著特征
+
+                【镜头 1｜5 秒】
+                画面：……（具体可视：主体动作、位置构图、环境细节）
+                运镜：……（推/拉/摇/移/跟/固定）
+                光线氛围：……
+                英文 Prompt：……（一句英文、60 词以内，含 subject+action+environment+camera+style）
+
+                （逐镜头列出，镜头之间用空行分隔）
+
+                【输出要求】
+                1. 镜头内容必须来自上文给定的情节材料，符合角色设定与世界观，不得虚构新设定；
+                2. 同一角色在所有镜头中的外貌与服装描述必须与【角色锚点】逐字一致；
+                3. 画面描述只写“看得见的东西”，禁止心理活动、旁白解释与抽象概念；
+                4. 每个镜头给出独立的英文 Prompt，方便直接粘贴到海外平台。
+                只输出上述提示词正文，不要解释、不要额外说明。
+                """);
+    }
+
+    /** 流式完成后落库：同一目标（章 / 宣传片）覆盖更新，保留最新一份；空输出不落库 */
+    private void persistVideoPrompt(Long novelId, Long chapterId, String mode, String content) {
+        if (content.isBlank()) {
+            return;
+        }
+        VideoPrompt vp = (chapterId != null
+                ? videoPromptRepository.findByNovelIdAndChapterId(novelId, chapterId)
+                : videoPromptRepository.findByNovelIdAndChapterIdIsNull(novelId))
+                .orElseGet(() -> {
+                    VideoPrompt p = new VideoPrompt();
+                    p.setNovelId(novelId);
+                    p.setChapterId(chapterId);
+                    p.setMode(mode);
+                    return p;
+                });
+        vp.setContent(content);
+        videoPromptRepository.save(vp);
+    }
+
+    /** 某作品的全部视频提示词（供前端「已生成」角标与直接查看） */
+    public List<VideoPrompt> listVideoPrompts(Long novelId, User user) {
+        Novel novel = novelService.loadOwned(novelId, user);
+        return videoPromptRepository.findByNovelIdOrderByUpdatedAtDesc(novel.getId());
+    }
+
+    /**
+     * 编辑作品时依据全书大纲一键生成简介（流式；不落库，由用户在表单确认后保存）。
+     * 不带旧简介——避免模型围着旧文案打转；书名/类型/文风/目标字数保留作为定位锚点。
+     */
+    public Flux<String> descriptionFromOutline(Long novelId, User user) {
+        Novel novel = novelService.loadOwned(novelId, user);
+        if (novel.getOutline() == null || novel.getOutline().isBlank()) {
+            throw new BizException(400, "请先在「全书大纲」里填写大纲，再生成简介", 400);
+        }
+        StringBuilder prompt = new StringBuilder("【作品信息】\n书名：").append(novel.getTitle())
+                .append("\n类型：").append(novel.getGenre() == null || novel.getGenre().isBlank() ? "未设置" : novel.getGenre());
+        if (novel.getLanguageStyle() != null && !novel.getLanguageStyle().isBlank()) {
+            prompt.append("\n语言风格：").append(novel.getLanguageStyle());
+        }
+        if (novel.getTargetWords() != null && novel.getTargetWords() > 0) {
+            prompt.append("\n目标字数：约").append(novel.getTargetWords()).append("字");
+        }
+        prompt.append("\n【全书大纲（简介的唯一事实来源）】\n").append(tail(novel.getOutline(), 2500)).append("""
+
+                【任务】
+                请依据全书大纲，为这部小说写一段发布平台的书籍简介。要求：
+                1. 100-200 字，纯文本，分段不超过 2 段；
+                2. 突出核心看点与最大冲突，交代主角与核心设定的钩子；
+                3. 只营造期待，不剧透结局与关键反转；
+                4. 语气贴合本书类型与语言风格，禁止空话套话（如“这是一部关于成长的故事”）；
+                5. 不要出现“本书”“作者”等自称，也不要 Markdown 与引号包装。
+                只输出简介正文，不要解释。
+                """);
+        return llm(user).stream(AiTaskType.DESCRIPTION, contextOf(novel, null), SYSTEM_PROMPT, prompt.toString());
+    }
+
+    /** 删除一条视频提示词（属主校验：不属于该作品的按 404 处理，避免暴露存在性） */
+    public void deleteVideoPrompt(Long novelId, Long videoPromptId, User user) {
+        novelService.loadOwned(novelId, user);
+        VideoPrompt vp = videoPromptRepository.findById(videoPromptId)
+                .filter(p -> p.getNovelId().equals(novelId))
+                .orElseThrow(() -> new BizException(404, "提示词不存在", 404));
+        videoPromptRepository.delete(vp);
     }
 
     public Flux<String> continueChapter(Long novelId, Long chapterId, User user) {
@@ -225,10 +431,12 @@ public class AiService {
      * - appendExisting=true：把本章已有内容的尾部作为上下文，让 AI 从断点**续写**（只增不重）。
      * 「从当前内容接着写」入口走这条。
      *
+    /**
      * @param totalChapters 全书总章节数（用于判断本章是否为终章）；为 null 时按已存在章节数推断
+     * @param authorNote 「作者有话说」：作者对本章的干预要求；为空时完全不注入（不改变既有行为）
      */
     public Flux<String> writeChapter(Long novelId, Long chapterId, User user, Integer totalChapters,
-            boolean appendExisting) {
+            boolean appendExisting, String authorNote) {
         Novel novel = novelService.loadOwned(novelId, user);
         int targetWords = perChapterTargetWords(novel, chapterId);
         Chapter chapter = loadChapter(novelId, chapterId);
@@ -291,6 +499,13 @@ public class AiService {
             prompt.append("\n【本章大纲（请严格据此展开，确保要点全部覆盖、收尾呼应大纲）】\n")
                     .append(curOutline.getOutline()).append("\n");
         }
+        // 作者有话说：作者本人的直接干预，优先级高于大纲与常规文风规则（两条底线除外：开篇衔接、完整收尾）
+        if (!isBlank(authorNote)) {
+            prompt.append("\n【作者有话说（作者本人对本章的明确要求，最高优先级）】\n")
+                    .append(tail(authorNote.trim(), AUTHOR_NOTE_MAX_CHARS)).append("\n")
+                    .append("请把以上要求逐条落实到本章正文中；与其他写作指示冲突时，以作者要求为准")
+                    .append("（仅「开篇与上一章无缝衔接」「结尾完整闭合」两条底线不可违反）。\n");
+        }
         prompt.append("\n【文风要求】\n").append(styleDirective(novel));
         prompt.append(isFinalChapter ? """
 
@@ -331,13 +546,22 @@ public class AiService {
      */
     public Flux<String> writeChapterAndSave(Long novelId, Long outlineId, User user, Integer totalChapters,
             boolean appendExisting) {
+        return writeChapterAndSave(novelId, outlineId, user, totalChapters, appendExisting, null);
+    }
+
+    /**
+     * 按大纲规划生成整章正文并落库（支持「作者有话说」干预，见
+     * {@link #writeChapter(Long, Long, User, Integer, boolean, String)}）。
+     */
+    public Flux<String> writeChapterAndSave(Long novelId, Long outlineId, User user, Integer totalChapters,
+            boolean appendExisting, String authorNote) {
         Novel novel = novelService.loadOwned(novelId, user);
         ChapterOutline outline = loadOutline(novelId, outlineId);
         // 规划 → 章节：没有章节就在此刻落地创建
         Chapter chapter = landChapter(novel, outline, user);
         String title = chapter.getTitle();
         StringBuilder acc = new StringBuilder();
-        return writeChapter(novelId, chapter.getId(), user, totalChapters, appendExisting)
+        return writeChapter(novelId, chapter.getId(), user, totalChapters, appendExisting, authorNote)
                 .doOnNext(acc::append)
                 .doOnComplete(() -> {
                     String generated = acc.toString().trim();
@@ -439,6 +663,135 @@ public class AiService {
         return current;
     }
 
+    // ===== 半自动伏笔记账：正文生成完成后 AI 提炼「新埋 / 已回收」建议，作者确认后写入 =====
+
+    /** 伏笔记账分析时注入的正文尾部长度：只看本章，无需全书 */
+    private static final int FORESHADOW_CONTENT_TAIL_CHARS = 6000;
+    /** 清单中每条伏笔描述的截取长度 */
+    private static final int FORESHADOW_ENTRY_CHARS = 120;
+    /** 单章最多建议登记的新伏笔条数：防止把瞬时悬念全记成长线 */
+    private static final int FORESHADOW_NEW_MAX = 3;
+    private static final Duration FORESHADOW_SUGGEST_TIMEOUT = Duration.ofSeconds(60);
+    /** 仅用于解析 AI 输出的轻量 JSON；静态实例避免改动构造器签名（测试与调用方零感知） */
+    private static final com.fasterxml.jackson.databind.ObjectMapper SUGGEST_JSON =
+            new com.fasterxml.jackson.databind.ObjectMapper();
+
+    /**
+     * 半自动伏笔记账：针对刚写完的一章正文，让 AI 对照账本中未回收伏笔，
+     * 提炼「本章新埋的伏笔」与「本章已回收的伏笔」，返回建议（**不落库**）。
+     * 前端弹确认卡片，作者勾选后才通过账本接口写入；任何失败都静默返回空建议，
+     * 记账绝不影响正文已保存的结果。
+     */
+    public ForeshadowSuggestVO suggestForeshadowing(Long novelId, Long chapterId, User user) {
+        Novel novel = novelService.loadOwned(novelId, user);
+        Chapter chapter = chapterRepository.findById(chapterId)
+                .filter(c -> !c.isDeleted() && novel.getId().equals(c.getNovelId()))
+                .orElseThrow(() -> new BizException(404, "章节不存在", 404));
+        if (isBlank(chapter.getContent())) {
+            return ForeshadowSuggestVO.empty();
+        }
+        List<Foreshadowing> open = foreshadowingRepository
+                .findByNovelIdOrderByPlantedOrderAscIdAsc(novel.getId()).stream()
+                .filter(f -> Foreshadowing.STATUS_OPEN.equals(f.getStatus()))
+                .toList();
+        try {
+            StringBuilder acc = new StringBuilder();
+            llm(user).stream(AiTaskType.FORESHADOW_SUGGEST, contextOf(novel, null),
+                            SYSTEM_PROMPT, foreshadowSuggestPrompt(chapter, open))
+                    .doOnNext(acc::append)
+                    .blockLast(FORESHADOW_SUGGEST_TIMEOUT);
+            return parseForeshadowSuggest(acc.toString(), open, chapter.getChapterOrder());
+        } catch (Exception e) {
+            log.warn("伏笔记账建议生成失败 novel={} chapter={}: {}", novel.getId(), chapterId, e.getMessage());
+            return ForeshadowSuggestVO.empty();
+        }
+    }
+
+    /** 伏笔记账分析 prompt：本章正文 + 未回收清单 + 严格 JSON 输出协议 */
+    String foreshadowSuggestPrompt(Chapter chapter, List<Foreshadowing> open) {
+        int order = chapter.getChapterOrder() == null ? 1 : chapter.getChapterOrder();
+        String title = isBlank(chapter.getTitle()) ? "" : "《" + chapter.getTitle() + "》";
+        StringBuilder p = new StringBuilder();
+        p.append("【本章正文（第").append(order).append("章").append(title).append("，刚写完）】\n")
+                .append(tail(chapter.getContent(), FORESHADOW_CONTENT_TAIL_CHARS)).append("\n");
+        if (open.isEmpty()) {
+            p.append("\n【当前未回收伏笔清单】（账本暂无未回收伏笔）\n");
+        } else {
+            p.append("\n【当前未回收伏笔清单（账本既有条目，#数字 为其 id）】\n");
+            for (Foreshadowing f : open) {
+                p.append("#").append(f.getId()).append(" ").append(f.getTitle());
+                if (!isBlank(f.getContent())) {
+                    p.append("：").append(tail(f.getContent(), FORESHADOW_ENTRY_CHARS));
+                }
+                p.append("\n");
+            }
+        }
+        return p.append("""
+
+                【任务】
+                对照上面的伏笔清单分析本章正文，只输出一个 JSON 对象（不要任何解释、不要 Markdown 代码块）：
+                1. "new"：本章**首次埋下**、需要在后续章节回收的长线悬念数组，每条格式
+                   {"title":"简短伏笔名（20字内）","content":"埋设描述：埋了什么、以什么形式呈现、回收时应给出什么（100字内）","plantedOrder":%d}；
+                   至多 %d 条；当章内已经解决的小悬念不要登记；
+                2. "resolved"：清单中**本章已明确回收**的伏笔 id 数组，如 [3,7]；只有正文确实给出答案或兑现承诺才算回收，没有则为 []；
+                3. 严格 JSON，字段缺失输出空值。
+                输出示例：{"new":[{"title":"玉佩的来历","content":"主角拾到的玉佩微微发烫，暗示与其身世相关","plantedOrder":%d}],"resolved":[]}
+                """.formatted(order, FORESHADOW_NEW_MAX, order)).toString();
+    }
+
+    /** 解析 AI 输出的记账建议 JSON；容错剥代码块、只取首个 {...}，任何异常降级为空建议 */
+    ForeshadowSuggestVO parseForeshadowSuggest(String raw, List<Foreshadowing> open, Integer chapterOrder) {
+        if (raw == null || raw.isBlank()) {
+            return ForeshadowSuggestVO.empty();
+        }
+        String json = raw.replace("```json", "").replace("```", "").trim();
+        int start = json.indexOf('{');
+        int end = json.lastIndexOf('}');
+        if (start < 0 || end <= start) {
+            return ForeshadowSuggestVO.empty();
+        }
+        try {
+            JsonNode root = SUGGEST_JSON.readTree(json.substring(start, end + 1));
+            List<ForeshadowNewVO> newItems = new ArrayList<>();
+            JsonNode arr = root.path("new");
+            if (arr.isArray()) {
+                for (JsonNode n : arr) {
+                    String title = n.path("title").asText("").trim();
+                    if (title.isEmpty()) {
+                        continue;
+                    }
+                    Integer planted = n.path("plantedOrder").asInt(0);
+                    newItems.add(new ForeshadowNewVO(
+                            tail(title, 60),
+                            n.path("content").asText("").trim(),
+                            planted > 0 ? planted : chapterOrder));
+                    if (newItems.size() >= FORESHADOW_NEW_MAX) {
+                        break;
+                    }
+                }
+            }
+            Map<Long, Foreshadowing> openById = new HashMap<>();
+            for (Foreshadowing f : open) {
+                openById.put(f.getId(), f);
+            }
+            List<ForeshadowResolvedVO> resolved = new ArrayList<>();
+            JsonNode ids = root.path("resolved");
+            if (ids.isArray()) {
+                for (JsonNode n : ids) {
+                    Foreshadowing f = openById.get(n.asLong(-1));
+                    // 只认账本里真实存在且未回收的条目，防止 AI 编造 id
+                    if (f != null) {
+                        resolved.add(new ForeshadowResolvedVO(f.getId(), f.getTitle(), chapterOrder));
+                    }
+                }
+            }
+            return new ForeshadowSuggestVO(List.copyOf(newItems), List.copyOf(resolved));
+        } catch (Exception e) {
+            log.warn("伏笔记账建议解析失败：{}", e.getMessage());
+            return ForeshadowSuggestVO.empty();
+        }
+    }
+
     /** 判断内容是否像被硬截断：结尾缺少句末标点，或末段明显过短 */
     static boolean looksTruncated(String content) {
         if (content == null || content.isBlank()) {
@@ -527,6 +880,15 @@ public class AiService {
      * 留空时按已有规划行数推断（大纲先行模型下二者一致）。
      */
     public Flux<String> generateChapterOutline(Long novelId, Long outlineId, User user, Integer totalChapters) {
+        return generateChapterOutline(novelId, outlineId, user, totalChapters, null);
+    }
+
+    /**
+     * 同上，支持「作者有话说」：作者对大纲规划的干预要求（重点情节、埋伏笔、禁区等），
+     * 非空时以最高优先级注入 prompt；为空时行为与原来完全一致。
+     */
+    public Flux<String> generateChapterOutline(Long novelId, Long outlineId, User user, Integer totalChapters,
+            String authorNote) {
         Novel novel = novelService.loadOwned(novelId, user);
         ChapterOutline outline = loadOutline(novelId, outlineId);
         // 全书总章节数：显式传入优先；否则以规划行数为准（大纲先行，章节由规划落地）
@@ -543,8 +905,10 @@ public class AiService {
                 existingContent = landed.getContent();
             }
         }
-        String prompt = buildChapterOutlinePrompt(novel, outline, isFinalChapter, existingContent,
-                previousOutlineText(novel.getId(), outline.getChapterOrder()));
+        // 大纲生成改用完整静态上下文（角色名册/世界观/未回收伏笔/故事脑/最近章节大纲）：
+        // 大纲是决定「是否回收长程伏笔」的环节，必须与正文生成享有同等记忆视野
+        String prompt = buildChapterOutlinePrompt(baseContext(novel), novel, outline, isFinalChapter,
+                existingContent, previousOutlineText(novel.getId(), outline.getChapterOrder()), authorNote);
         StringBuilder acc = new StringBuilder();
         return llm(user).stream(AiTaskType.CHAPTER_OUTLINE, contextOf(novel, existingContent),
                 SYSTEM_PROMPT, prompt)
@@ -564,12 +928,33 @@ public class AiService {
      */
     String buildChapterOutlinePrompt(Novel novel, ChapterOutline outline, boolean isFinalChapter,
             String existingContent, String prevOutlineText) {
-        StringBuilder prompt = new StringBuilder(contextBuilder.buildNovelInfo(novel));
+        return buildChapterOutlinePrompt(novel, outline, isFinalChapter, existingContent, prevOutlineText, null);
+    }
+
+    /**
+     * 同上，支持「作者有话说」：note 非空时在已有草稿/正文之后注入作者干预要求（最高优先级）。
+     */
+    String buildChapterOutlinePrompt(Novel novel, ChapterOutline outline, boolean isFinalChapter,
+            String existingContent, String prevOutlineText, String authorNote) {
+        StringBuilder head = new StringBuilder(contextBuilder.buildNovelInfo(novel));
         // 全书大纲：主线走向与结局规划的唯一来源；取尾部（结局/完结描述一般在文末）
         if (!isBlank(novel.getOutline())) {
-            prompt.append("\n【全书大纲（全书主线走向与结局规划，本章规划必须严格遵循）】\n")
+            head.append("\n【全书大纲（全书主线走向与结局规划，本章规划必须严格遵循）】\n")
                     .append(tail(novel.getOutline(), BOOK_OUTLINE_TAIL_CHARS)).append("\n");
         }
+        return buildChapterOutlinePrompt(head.toString(), novel, outline, isFinalChapter, existingContent,
+                prevOutlineText, authorNote);
+    }
+
+    /**
+     * 同上，但头部直接传入完整静态上下文（baseContext）：
+     * 生成大纲时携带角色名册、世界观、未回收伏笔清单、故事脑与最近章节大纲——
+     * 大纲是「决定要不要回收伏笔」的环节，此前反而是上下文最瘦的链路（历史缺口）。
+     * 此时全书大纲已包含在 head 内（受预算截断保护），不再重复注入。
+     */
+    String buildChapterOutlinePrompt(String head, Novel novel, ChapterOutline outline, boolean isFinalChapter,
+            String existingContent, String prevOutlineText, String authorNote) {
+        StringBuilder prompt = new StringBuilder(head);
         // 上一章大纲：连续叙事的直接上文，本章必须承接（第一章无上一章，自然缺省）
         if (!isBlank(prevOutlineText)) {
             prompt.append("\n【上一章大纲（本章的直接上文：承接其结局状态，不得重复或断裂）】\n")
@@ -590,6 +975,13 @@ public class AiService {
         if (!isBlank(existingContent)) {
             prompt.append("【该章已有正文（规划须与已写内容一致）】\n")
                     .append(tail(existingContent, 2000)).append("\n");
+        }
+        // 作者有话说：作者对这一章规划的直接干预，优先级高于全书大纲的常规走向（终章仍必须完结收束）
+        if (!isBlank(authorNote)) {
+            prompt.append("\n【作者有话说（作者本人对本章规划的明确要求，最高优先级）】\n")
+                    .append(tail(authorNote.trim(), AUTHOR_NOTE_MAX_CHARS)).append("\n")
+                    .append("请把以上要求体现到本章的章节名与大纲要点中；与「全书大纲」的常规走向冲突时，")
+                    .append("以作者要求为准（本章若为全书最后一章，仍必须完结收束全书）。\n");
         }
         prompt.append("\n【文风要求】\n").append(styleDirective(novel));
         prompt.append("""
@@ -769,13 +1161,16 @@ public class AiService {
         return t;
     }
 
-    /** 按优先级打包的静态上下文：作品信息 + 一致性卡片 + 大纲 + 故事脑 + 已规划章节大纲 */
+    /** 按优先级打包的静态上下文：作品信息 + 一致性卡片 + 未回收伏笔 + 大纲 + 故事脑 + 已规划章节大纲 */
     private String baseContext(Novel novel) {
         List<NovelCharacter> characters = characterRepository.findByNovelIdOrderByCreatedAtAscIdAsc(novel.getId());
         List<WorldSetting> worlds = worldSettingRepository.findByNovelIdOrderByCreatedAtAscIdAsc(novel.getId());
         StoryMemory memory = storyMemoryRepository.findByNovelId(novel.getId()).orElse(null);
         List<ChapterOutline> outlines = chapterOutlineRepository.findByNovelIdOrderByChapterOrderAsc(novel.getId());
-        return contextBuilder.buildBase(novel, characters, worlds, memory, outlines);
+        // 仅注入未回收伏笔：RESOLVED/ABANDONED 不占预算、不误导模型
+        List<Foreshadowing> foreshadows = foreshadowingRepository
+                .findByNovelIdAndStatusOrderByPlantedOrderAscIdAsc(novel.getId(), Foreshadowing.STATUS_OPEN);
+        return contextBuilder.buildBase(novel, characters, worlds, memory, outlines, foreshadows);
     }
 
     /**
@@ -845,6 +1240,8 @@ public class AiService {
     /** 前文大纲概览最多回溯几章 */
     private static final int RECENT_OUTLINE_CHAPTERS = 3;
     private static final int RECENT_OUTLINE_CHARS = 260;
+    /** 「作者有话说」注入 prompt 的最大长度：前端限 500 字，这里兜底防超长指令挤压正文上下文 */
+    private static final int AUTHOR_NOTE_MAX_CHARS = 500;
 
     /**
      * 注入前若干章的大纲概览（不含本章与上一章）：维持长线主线、人物状态与未回收伏笔的一致性，

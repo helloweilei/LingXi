@@ -12,10 +12,15 @@ public final class OutlineTaskDtos {
      * 发起批量生成大纲任务：outlineIds 留空表示全书大纲内容为空的规划行。
      * chapters 仅在全书还没有任何规划行时有意义：先按数量补建空规划行，再逐条生成内容，
      * 使用户可以「一键从零规划全书」——不必先手动新增规划。
+     * authorNote：「作者有话说」——对每章大纲规划的干预要求（可选，对整批生效）。
      */
-    public record StartReq(List<Long> outlineIds, Integer chapters) {
+    public record StartReq(List<Long> outlineIds, Integer chapters, String authorNote) {
         public StartReq(List<Long> outlineIds) {
-            this(outlineIds, null);
+            this(outlineIds, null, null);
+        }
+
+        public StartReq(List<Long> outlineIds, Integer chapters) {
+            this(outlineIds, chapters, null);
         }
     }
 

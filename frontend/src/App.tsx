@@ -8,6 +8,7 @@ import Editor from './pages/Editor';
 import Reader from './pages/Reader';
 import Guide from './pages/Guide';
 import Assistant from './pages/Assistant';
+import VideoStudio from './pages/VideoStudio';
 import type { ReactNode } from 'react';
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -31,6 +32,7 @@ export default function App() {
         <Route path="novel/:id" element={<NovelDetail />} />
         <Route path="guide" element={<Guide />} />
         <Route path="assistant" element={<Assistant />} />
+        <Route path="video-studio" element={<VideoStudio />} />
       </Route>
       <Route
         path="/write/:chapterId"

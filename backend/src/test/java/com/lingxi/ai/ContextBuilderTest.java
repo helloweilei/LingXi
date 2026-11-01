@@ -83,4 +83,24 @@ class ContextBuilderTest {
         String base = builder.buildBase(novel(), List.of(), List.of(), memory, List.of());
         assertThat(base).contains("故事脑").contains("玉佩伏笔尚未回收");
     }
+
+    @Test
+    void openForeshadowingsAreInjectedWithChapterHints() {
+        com.lingxi.memory.Foreshadowing open = new com.lingxi.memory.Foreshadowing();
+        open.setTitle("师父的身世之谜");
+        open.setContent("第 3 章师父留下的半块玉佩，回收时须揭示其与魔教的关系");
+        open.setPlantedOrder(3);
+        open.setExpectedOrder(12);
+        open.setStatus(com.lingxi.memory.Foreshadowing.STATUS_OPEN);
+        com.lingxi.memory.Foreshadowing resolved = new com.lingxi.memory.Foreshadowing();
+        resolved.setTitle("已回收的旧伏笔");
+        resolved.setStatus(com.lingxi.memory.Foreshadowing.STATUS_RESOLVED);
+        String base = builder.buildBase(novel(), List.of(), List.of(), null, List.of(),
+                List.of(open, resolved));
+        // OPEN 条目必须在场（长程悬念始终可见），并带埋设/预期回收章提示
+        assertThat(base).contains("未回收伏笔").contains("师父的身世之谜").contains("玉佩")
+                .contains("埋于第3章").contains("预期第12章前后回收");
+        // 已回收条目不再注入，避免占预算、误导模型
+        assertThat(base).doesNotContain("已回收的旧伏笔");
+    }
 }

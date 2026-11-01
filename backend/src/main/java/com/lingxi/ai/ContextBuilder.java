@@ -3,6 +3,7 @@ package com.lingxi.ai;
 import com.lingxi.character.NovelCharacter;
 import com.lingxi.config.AiProperties;
 import com.lingxi.memory.ChapterOutline;
+import com.lingxi.memory.Foreshadowing;
 import com.lingxi.memory.StoryMemory;
 import com.lingxi.novel.Novel;
 import com.lingxi.world.WorldSetting;
@@ -22,12 +23,15 @@ public class ContextBuilder {
     /** 各段独立预算（字符），总和 ≤ 默认总预算 8000 */
     private static final int INFO_BUDGET = 300;
     private static final int CARD_BUDGET = 1200;
+    /** 未回收伏笔清单：长程悬念的唯一可靠载体，优先级高于全书大纲（被压缩时优先保它） */
+    private static final int FORESHADOW_BUDGET = 800;
     private static final int OUTLINE_BUDGET = 2800;
     private static final int BRAIN_BUDGET = 1600;
     private static final int OUTLINE_CHAIN_BUDGET = 1600;
     private static final int OUTLINE_CHAIN_ENTRY_BUDGET = 300;
     private static final int CARD_DESC_BUDGET = 80;
     private static final int CARD_WORLD_BUDGET = 120;
+    private static final int FORESHADOW_ENTRY_BUDGET = 120;
     private static final String ELLIPSIS = "……（略）……";
 
     private final int totalBudget;
@@ -43,12 +47,23 @@ public class ContextBuilder {
         return buildInfo(novel);
     }
 
-    /** 按优先级打包全部静态上下文段 */
+    /** 按优先级打包全部静态上下文段（历史兼容入口：不含伏笔清单） */
     public String buildBase(Novel novel, List<NovelCharacter> characters, List<WorldSetting> worlds,
                             StoryMemory memory, List<ChapterOutline> outlines) {
+        return buildBase(novel, characters, worlds, memory, outlines, null);
+    }
+
+    /**
+     * 同上，支持未回收伏笔清单：OPEN 条目作为独立段注入，
+     * 使超过前文回顾窗口（约 3 章）的长程悬念在生成时始终在场。
+     */
+    public String buildBase(Novel novel, List<NovelCharacter> characters, List<WorldSetting> worlds,
+                            StoryMemory memory, List<ChapterOutline> outlines,
+                            List<Foreshadowing> foreshadowings) {
         List<Section> sections = new ArrayList<>();
         sections.add(new Section(buildInfo(novel), INFO_BUDGET));
         sections.add(new Section(buildConsistencyCard(characters, worlds), CARD_BUDGET));
+        sections.add(new Section(buildForeshadowings(foreshadowings), FORESHADOW_BUDGET));
         sections.add(new Section(buildOutline(novel), OUTLINE_BUDGET));
         sections.add(new Section(buildBrain(memory), BRAIN_BUDGET));
         sections.add(new Section(buildOutlines(outlines), OUTLINE_CHAIN_BUDGET));
@@ -110,6 +125,38 @@ public class ContextBuilder {
             return "";
         }
         return "【全书大纲】\n" + novel.getOutline();
+    }
+
+    /**
+     * 未回收伏笔清单：只含 OPEN 条目（RESOLVED/ABANDONED 不注入，避免占预算、误导模型）。
+     * 每条带埋设章序与预期回收章，模型可据此在合适章节安排承接与回收。
+     */
+    private String buildForeshadowings(List<Foreshadowing> items) {
+        if (items == null || items.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder("【未回收伏笔（规划与写作时优先承接，到达合适章节应回收，不得凭空遗忘或自相矛盾）】\n");
+        for (Foreshadowing f : items) {
+            // 构建器层兜底过滤：即便调用方传入了非 OPEN 条目也不注入
+            if (!Foreshadowing.STATUS_OPEN.equals(f.getStatus())) {
+                continue;
+            }
+            sb.append("- ").append(f.getTitle());
+            if (f.getContent() != null && !f.getContent().isBlank()) {
+                sb.append("：").append(trimTail(f.getContent(), FORESHADOW_ENTRY_BUDGET));
+            }
+            if (f.getPlantedOrder() != null) {
+                sb.append("（埋于第").append(f.getPlantedOrder()).append("章");
+                if (f.getExpectedOrder() != null) {
+                    sb.append("，预期第").append(f.getExpectedOrder()).append("章前后回收");
+                }
+                sb.append("）");
+            } else if (f.getExpectedOrder() != null) {
+                sb.append("（预期第").append(f.getExpectedOrder()).append("章前后回收）");
+            }
+            sb.append("\n");
+        }
+        return sb.toString().trim();
     }
 
     private String buildBrain(StoryMemory memory) {

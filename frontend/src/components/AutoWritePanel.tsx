@@ -20,6 +20,7 @@ import {
 import { DeleteOutlined, PauseCircleOutlined, PlayCircleOutlined, RobotOutlined } from '@ant-design/icons';
 import { novelApi, taskApi } from '../api';
 import type { WritingTaskVO } from '../api/types';
+import { LIST_PAGINATION } from '../utils/pagination';
 import { LANGUAGE_STYLES, styleToArray, styleToString } from './NovelFormModal';
 
 const STATUS_TAG: Record<string, { color: string; text: string }> = {
@@ -233,7 +234,7 @@ export default function AutoWritePanel({
       <Table
         rowKey="id"
         dataSource={tasks}
-        pagination={false}
+        pagination={LIST_PAGINATION}
         size="small"
         locale={{ emptyText: '还没有自动创作任务。设置好章节数等选项，点“开始创作”即可。' }}
         columns={[

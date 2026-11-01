@@ -30,10 +30,13 @@ public class MockLlmClient implements LlmClient {
             case CHAPTER_OUTLINE -> chapterOutline(ctx);
             case GUIDE_PROPOSAL -> guideProposals(ctx);
             case COVER_PROMPT -> coverPrompt(ctx, userPrompt);
+            case VIDEO_PROMPT -> videoPrompt(ctx);
             case CHAPTER_TITLE -> chapterTitle(ctx);
             case PROOFREAD -> proofread(ctx);
             case DEAI -> deAi(ctx);
             case CHARACTER_RELATION -> characterRelations(ctx);
+            case DESCRIPTION -> description(ctx);
+            case FORESHADOW_SUGGEST -> foreshadowSuggest(userPrompt);
         };
         List<String> chunks = new ArrayList<>();
         int i = 0;
@@ -160,6 +163,41 @@ public class MockLlmClient implements LlmClient {
                 """, title, genre, authorLine);
     }
 
+    private String videoPrompt(AiContext ctx) {
+        String hero = (ctx.characterNames() == null || ctx.characterNames().isEmpty())
+                ? "主角" : ctx.characterNames().get(0);
+        return String.format("""
+                【风格锚点】
+                画风：电影写实，暗调史诗
+                年代与场景基调：东方幻想大陆，山巅古观与幽暗密林
+                色调与光线：冷蓝主调、暖金点缀，逆光与云隙光
+                画幅：16:9 横屏
+
+                【角色锚点】
+                %s：青年男性，黑色短发束高马尾，藏青色长袍束银色腰封，眉眼坚毅，左手腕有月牙形旧疤
+
+                【镜头 1｜5 秒】
+                画面：%s立于山巅古观檐角，衣袍与马尾向后猎猎，远处乌云压城、云隙间漏下一线金光
+                运镜：缓慢推进（由远及近，落至半身）
+                光线氛围：逆光剪影，云隙光勾边
+                英文 Prompt：a young man in dark blue robes standing on the edge of a mountain temple roof, wind blowing his hair and robe, dramatic storm clouds with a beam of golden light, slow push-in shot, epic cinematic style
+
+                【镜头 2｜5 秒】
+                画面：%s拔剑出鞘，剑刃映出冷月，转身面向镜头，眼神锐利
+                运镜：环绕跟随（180 度弧线）
+                光线氛围：冷调月光，剑刃高光
+                英文 Prompt：close-up of a young man in dark blue robes unsheathing a glowing sword under moonlight, determined eyes, orbiting camera shot, high contrast, cinematic fantasy
+
+                【镜头 3｜5 秒】
+                画面：密林深处一双猩红眼睛缓缓睁开，枝叶剪影间雾气流动
+                运镜：固定镜头，微幅推近
+                光线氛围：低照度，红光为唯一亮源
+                英文 Prompt：a pair of crimson eyes slowly opening in a dark misty forest, silhouetted branches, faint red glow, subtle zoom-in, suspenseful horror atmosphere
+
+                （Mock 引擎仅生成占位内容；接入真实模型后将依据章节正文或全书大纲产出贴合的分镜提示词。）
+                """, hero, hero, hero);
+    }
+
     private String continueText(AiContext ctx) {
         String hero = (ctx.characterNames() == null || ctx.characterNames().isEmpty())
                 ? "他" : ctx.characterNames().get(0);
@@ -233,6 +271,29 @@ public class MockLlmClient implements LlmClient {
 
                 深吸一口气，再缓缓吐出。该来的总会来，而他要做的，只是在它到来之前，站到该站的位置上去。
                 """, src);
+    }
+
+    /** 占位简介：接入真实模型后依据大纲产出正式简介 */
+    private String description(AiContext ctx) {
+        String title = ctx.novelTitle() == null || ctx.novelTitle().isBlank() ? "本书" : ctx.novelTitle();
+        return String.format("""
+                《%s》：一场始于意外的命运转折，将平凡的少年推入暗流汹涌的世界。他必须在成长与代价之间做出抉择，\n每一个看似偶然的相遇，都在悄悄改写故事的走向。热血、悬念与温情交织，一部让人一旦翻开就停不下来的长篇佳作。（Mock 示例简介，接入真实模型后依据大纲自动生成）\n                """, title);
+    }
+
+    /** Mock 伏笔记账建议：若正文 prompt 里带未回收伏笔清单（#id），顺带建议回收第一条，便于走通确认链路 */
+    private String foreshadowSuggest(String userPrompt) {
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("#(\\d+)")
+                .matcher(userPrompt == null ? "" : userPrompt);
+        String resolved = "";
+        if (m.find()) {
+            resolved = """
+                    ,
+                      "resolved": [ {"id": %s, "title": "（Mock）本章回收的既有伏笔", "resolvedOrder": null} ]""".formatted(m.group(1));
+        }
+        return """
+                {
+                  "new": [ {"title": "神秘信物的来历", "content": "本章首次出现主角随身携带的神秘信物，来历未明，后续章节可安排揭晓其真正含义。", "plantedOrder": null} ]%s
+                }""".formatted(resolved);
     }
 
     private String chat(AiContext ctx) {

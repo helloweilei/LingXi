@@ -21,6 +21,7 @@ import {
 } from "@ant-design/icons";
 import dayjs from "dayjs";
 import { chapterApi } from "../api";
+import { LIST_PAGINATION } from "../utils/pagination";
 import type { Chapter, ChapterVersion } from "../api/types";
 
 const { Paragraph, Text } = Typography;
@@ -171,7 +172,7 @@ export default function VersionHistoryModal({
         ) : (
           <List
             dataSource={versions}
-            pagination={false}
+            pagination={LIST_PAGINATION}
             style={{ maxHeight: 460, overflowY: "auto" }}
             renderItem={(v) => {
               const meta = REASON_META[v.reason ?? ""] ?? {

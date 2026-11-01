@@ -44,6 +44,8 @@ class AiServiceChapterOutlinePromptTest {
             mock(WorldSettingRepository.class),
             outlineRepo,
             mock(StoryMemoryRepository.class),
+            mock(VideoPromptRepository.class),
+            mock(com.lingxi.memory.ForeshadowingRepository.class),
             new ContextBuilder(new AiProperties()));
 
     private static Novel novelWithOutline(String outline) {

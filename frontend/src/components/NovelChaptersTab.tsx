@@ -1,18 +1,21 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Key } from "react";
-import { Button, Empty, Input, Modal, Popconfirm, Space, Table, Tag, Tooltip, message } from "antd";
+import { Button, Badge, Empty, Input, Modal, Popconfirm, Space, Table, Tag, Tooltip, message } from "antd";
 import {
   CopyOutlined,
   DeleteOutlined,
   EditOutlined,
   FileAddOutlined,
   RobotOutlined,
+  VideoCameraOutlined,
 } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 import dayjs from "dayjs";
 import { chapterApi } from "../api";
 import { streamSse } from "../api/ai";
 import { copyText } from "../utils/clipboard";
+import { LIST_PAGINATION } from "../utils/pagination";
+import VideoPromptModal from "./VideoPromptModal";
 import type { Chapter, ChapterMeta } from "../api/types";
 
 /** 一键复制全文的字数上限：全书总字数超过该值时禁用按钮，避免超大文本导致剪贴板失败或浏览器卡顿 */
@@ -51,11 +54,17 @@ export default function ChaptersTab({
   novelId,
   refreshKey,
   totalWords,
+  videoChapterIds,
+  onVideoChanged,
 }: {
   novelId: number;
   refreshKey: number;
   /** 全书当前总字数（超过上限时禁用「复制全文」） */
   totalWords?: number;
+  /** 已生过分镜提示词的章节 id：按钮加角标，点开直接查看 */
+  videoChapterIds?: number[];
+  /** 视频提示词生成/删除后刷新角标 */
+  onVideoChanged?: () => void;
 }) {
   const navigate = useNavigate();
   const [chapters, setChapters] = useState<ChapterMeta[]>([]);
@@ -72,6 +81,8 @@ export default function ChaptersTab({
   const [namingId, setNamingId] = useState<number | null>(null);
   // 一键复制全文（逐章拉取正文中）
   const [copying, setCopying] = useState(false);
+  // 视频分镜提示词：当前打开抽屉的章节（null = 关闭）
+  const [videoChapter, setVideoChapter] = useState<ChapterMeta | null>(null);
   /** 复制全文禁用条件：全书总字数超上限（超限时复制易失败/卡顿） */
   const copyFullDisabled = (totalWords ?? 0) > COPY_FULL_MAX_WORDS;
   const copyFullTip = copyFullDisabled
@@ -269,7 +280,7 @@ export default function ChaptersTab({
         rowKey="id"
         loading={loading}
         dataSource={chapters}
-        pagination={false}
+        pagination={LIST_PAGINATION}
         rowSelection={{
           selectedRowKeys: selectedKeys,
           onChange: (keys) => setSelectedKeys(keys),
@@ -362,7 +373,7 @@ export default function ChaptersTab({
           },
           {
             title: "操作",
-            width: 160,
+            width: 200,
             render: (_: any, r: ChapterMeta) => (
               <Space>
                 <Button
@@ -372,6 +383,24 @@ export default function ChaptersTab({
                 >
                   编辑
                 </Button>
+                <Tooltip
+                  title={
+                    videoChapterIds?.includes(r.id)
+                      ? "已生成本章分镜提示词，点开直接查看，可重新生成或删除"
+                      : "生成本章视频分镜提示词，可逐镜头复制到视频生成平台"
+                  }
+                >
+                  <Badge dot={videoChapterIds?.includes(r.id)} color="#6a5acd" offset={[-4, 6]}>
+                    <Button
+                      type="link"
+                      size="small"
+                      icon={<VideoCameraOutlined />}
+                      onClick={() => setVideoChapter(r)}
+                    >
+                      视频
+                    </Button>
+                  </Badge>
+                </Tooltip>
                 <Popconfirm
                   title="确定删除这一章？"
                   okText="删除"
@@ -386,6 +415,19 @@ export default function ChaptersTab({
             ),
           },
         ]}
+      />
+      <VideoPromptModal
+        key={videoChapter?.id ?? "closed"}
+        open={!!videoChapter}
+        novelId={novelId}
+        chapter={
+          videoChapter
+            ? { id: videoChapter.id, order: videoChapter.chapterOrder, title: videoChapter.title }
+            : null
+        }
+        novelTitle=""
+        onClose={() => setVideoChapter(null)}
+        onChanged={onVideoChanged}
       />
       <Modal
         title="新建章节"

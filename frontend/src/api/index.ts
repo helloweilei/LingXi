@@ -8,6 +8,8 @@ import type {
   ChapterVersion,
   CharacterRelationVO,
   CharacterVO,
+  ForeshadowingItem,
+  ForeshadowSuggest,
   SpeechConfigVO,
   SpeechProvider,
   Novel,
@@ -116,6 +118,20 @@ export const aiApi = {
   testConfig: () => get<{ ok: boolean; latencyMs: number; message: string }>('/ai/config/test'),
 };
 
+/** 已生成的视频提示词（chapterId 为空 = 全书宣传片；同一目标只保留最新一份） */
+export interface VideoPromptVO {
+  id: number;
+  chapterId: number | null;
+  mode: string;
+  content: string;
+  updatedAt: string;
+}
+
+export const videoPromptApi = {
+  list: (novelId: number) => get<VideoPromptVO[]>(`/ai/novels/${novelId}/video-prompts`),
+  remove: (novelId: number, id: number) => del(`/ai/novels/${novelId}/video-prompts/${id}`),
+};
+
 export const uploadApi = {
   /** 上传图片（封面等），返回静态资源路径 */
   upload: (file: File) => {
@@ -138,11 +154,11 @@ export const outlineApi = {
   /** 手动新增一行规划（只建大纲，不创建章节；提交后表格新增一行） */
   create: (novelId: number, req: CreateOutlineReq) =>
     post<ChapterOutlineItem[]>(`/novels/${novelId}/outlines`, req ?? {}),
-  /** 同步批量生成大纲内容（仅适合少量）；批量请用 outlineTaskApi 异步执行 */
-  generate: (novelId: number, outlineIds?: number[]) =>
+  /** 同步批量生成大纲内容（仅适合少量）；批量请用 outlineTaskApi 异步执行。authorNote：作者有话说（可选干预） */
+  generate: (novelId: number, outlineIds?: number[], authorNote?: string) =>
     post<ChapterOutlineItem[]>(
       `/novels/${novelId}/outlines/generate`,
-      outlineIds ? { outlineIds } : {}
+      { outlineIds, authorNote: authorNote?.trim() || undefined }
     ),
   /**
    * 只改章节名（不动大纲内容与字数）。
@@ -166,13 +182,43 @@ export const outlineApi = {
     del(`/novels/${novelId}/outlines/${outlineId}`),
 };
 
+/** 伏笔账本：跨章节悬念登记；OPEN 条目自动注入大纲/正文生成的 prompt（未回收伏笔清单） */
+export interface ForeshadowReq {
+  title: string;
+  content?: string | null;
+  plantedOrder?: number | null;
+  expectedOrder?: number | null;
+}
+
+export const foreshadowApi = {
+  list: (novelId: number) => get<ForeshadowingItem[]>(`/novels/${novelId}/foreshadowings`),
+  create: (novelId: number, req: ForeshadowReq) =>
+    post<ForeshadowingItem>(`/novels/${novelId}/foreshadowings`, req),
+  update: (novelId: number, id: number, req: Partial<ForeshadowReq>) =>
+    put<void>(`/novels/${novelId}/foreshadowings/${id}`, req),
+  changeStatus: (
+    novelId: number,
+    id: number,
+    status: ForeshadowingItem["status"],
+    resolvedOrder?: number | null
+  ) => put<void>(`/novels/${novelId}/foreshadowings/${id}/status`, { status, resolvedOrder }),
+  remove: (novelId: number, id: number) => del(`/novels/${novelId}/foreshadowings/${id}`),
+  /**
+   * 半自动伏笔记账：对刚写完的一章正文，AI 对照账本提炼「新埋 / 已回收」建议。
+   * 只返回建议不落库；失败由后端静默返回空建议。
+   */
+  suggest: (novelId: number, chapterId: number) =>
+    post<ForeshadowSuggest>(`/ai/novels/${novelId}/chapters/${chapterId}/foreshadow-suggest`, {}),
+};
+
 /** 大纲批量生成任务：后台逐条执行，前端轮询进度，避免长任务触发 HTTP 超时 */
 export const outlineTaskApi = {
   /**
    * chapters：全书还没有规划行时，先按数量创建规划行再逐章生成（一键从零规划）；
    * 留空则只生成已有规划行中缺大纲内容的行。
+   * authorNote：作者有话说（可选，对整批每章大纲生效）。
    */
-  start: (novelId: number, req: { outlineIds?: number[]; chapters?: number }) =>
+  start: (novelId: number, req: { outlineIds?: number[]; chapters?: number; authorNote?: string }) =>
     post<OutlineTaskVO>(`/novels/${novelId}/outline-tasks`, req),
   list: (novelId: number) => get<OutlineTaskVO[]>(`/novels/${novelId}/outline-tasks`),
   get: (taskId: number) => get<OutlineTaskVO>(`/outline-tasks/${taskId}`),

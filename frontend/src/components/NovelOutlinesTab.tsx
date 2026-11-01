@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
+  Badge,
   Button,
+  Checkbox,
+  Drawer,
   Dropdown,
   Empty,
   Input,
@@ -11,6 +14,7 @@ import {
   Space,
   Spin,
   Table,
+  Tag,
   Tooltip,
   Typography,
   message,
@@ -21,17 +25,31 @@ import {
   EditOutlined,
   EyeOutlined,
   FileAddOutlined,
+  FlagOutlined,
   PlusOutlined,
   RobotOutlined,
   RollbackOutlined,
 } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
-import { outlineApi, outlineTaskApi } from "../api";
+import { foreshadowApi, outlineApi, outlineTaskApi } from "../api";
 import { streamSse } from "../api/ai";
 import { copyText } from "../utils/clipboard";
-import type { ChapterOutlineItem, OutlineTaskVO } from "../api/types";
+import { LIST_PAGINATION } from "../utils/pagination";
+import type {
+  ChapterOutlineItem,
+  ForeshadowNewSuggest,
+  ForeshadowResolvedSuggest,
+  ForeshadowSuggest,
+  ForeshadowingItem,
+  OutlineTaskVO,
+} from "../api/types";
 
 const { Paragraph } = Typography;
+
+/** 生成正文前的待生成目标：单章（可整章重写或接着写）或一键全部 */
+type WriteTarget =
+  | { mode: "one"; item: ChapterOutlineItem; append: boolean }
+  | { mode: "all" };
 
 export default function OutlineTab({
   novelId,
@@ -80,6 +98,36 @@ export default function OutlineTab({
   const [planChapters, setPlanChapters] = useState(10);
   // 单章「生成/重生成」进行中的规划行 id：按钮 loading + 禁用其他生成入口，避免重复点击
   const [generatingId, setGeneratingId] = useState<number | null>(null);
+  // 「作者有话说」弹窗：生成正文前让作者对本章内容加以干预（重点、禁区、写法要求等，可选）
+  // 待生成目标：单章（item + 是否接着写）或一键全部
+  const [writeCfgTarget, setWriteCfgTarget] = useState<WriteTarget | null>(null);
+  // 作者有话说内容：保留上次输入，方便连续多章复用同一批要求
+  const [authorNote, setAuthorNote] = useState("");
+  // 「作者有话说」弹窗（大纲版）：生成/重生成单条大纲、一键补全缺失大纲前填写
+  const [outlineCfgTarget, setOutlineCfgTarget] = useState<
+    | { kind: "one"; outlineId: number; title: string }
+    | { kind: "all" }
+    | null
+  >(null);
+  // 大纲规划的作者有话说：保留上次输入，方便多章复用；与正文生成的输入相互独立
+  const [outlineNote, setOutlineNote] = useState("");
+  // 「伏笔账本」抽屉：跨章节悬念登记；OPEN 条目自动注入大纲/正文生成的 prompt
+  const [fsOpen, setFsOpen] = useState(false);
+  const [fsItems, setFsItems] = useState<ForeshadowingItem[]>([]);
+  const [fsLoading, setFsLoading] = useState(false);
+  const [fsSaving, setFsSaving] = useState(false);
+  // 编辑中的伏笔 id；null 表示处于「新增」模式
+  const [fsEditingId, setFsEditingId] = useState<number | null>(null);
+  const [fsTitle, setFsTitle] = useState("");
+  const [fsContent, setFsContent] = useState("");
+  const [fsPlanted, setFsPlanted] = useState<number | null>(null);
+  const [fsExpected, setFsExpected] = useState<number | null>(null);
+  // 半自动伏笔记账：正文生成完成后 AI 提炼的建议（确认弹窗）；带 checked 供作者勾选
+  const [suggOpen, setSuggOpen] = useState(false);
+  const [suggChapter, setSuggChapter] = useState("");
+  const [suggNew, setSuggNew] = useState<(ForeshadowNewSuggest & { checked: boolean })[]>([]);
+  const [suggResolved, setSuggResolved] = useState<(ForeshadowResolvedSuggest & { checked: boolean })[]>([]);
+  const [suggApplying, setSuggApplying] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -141,7 +189,7 @@ export default function OutlineTab({
    * - chapters 有值：全书还没有规划行时，先按数量创建规划行再逐章生成（一键从零规划）；
    * - 否则：仅对已存在的规划行生成内容，不创建规划/章节。
    */
-  const startTask = async (req: { outlineIds?: number[]; chapters?: number }) => {
+  const startTask = async (req: { outlineIds?: number[]; chapters?: number; authorNote?: string }) => {
     try {
       const t = await outlineTaskApi.start(novelId, req);
       setTask(t);
@@ -188,24 +236,39 @@ export default function OutlineTab({
       message.info("所有规划都已填写大纲内容，无需重复生成");
       return;
     }
-    void startTask({});
+    // 先弹「作者有话说」让作者干预规划（可选），确认后开始批量任务
+    setOutlineCfgTarget({ kind: "all" });
   };
 
-  /** 确认从零规划：按章节数创建规划行并逐章生成大纲（不生成正文） */
+  /** 确认从零规划：按章节数创建规划行并逐章生成大纲（不生成正文）；「作者有话说」在规划弹窗内填写 */
   const confirmPlan = () => {
     setPlanOpen(false);
-    void startTask({ chapters: planChapters });
+    void startTask({ chapters: planChapters, authorNote: outlineNote.trim() || undefined });
+  };
+
+  /** 单条生成/重生成前弹窗：填写「作者有话说」（可选）后开始 */
+  const openOutlineCfg = (item: ChapterOutlineItem) => {
+    if (running || generatingId !== null) {
+      return;
+    }
+    setOutlineCfgTarget({
+      kind: "one",
+      outlineId: item.outlineId,
+      title: `${item.hasOutline ? "重生成大纲" : "生成大纲"} · 第${item.chapterOrder}章${
+        item.chapterTitle ? `《${item.chapterTitle}》` : ""
+      }`,
+    });
   };
 
   /** 单条生成/重生成：走同步接口（一次调用，不会超时）。按钮有 loading，且禁用其他生成入口防重复点击 */
-  const generateOne = async (outlineId: number) => {
+  const generateOne = async (outlineId: number, note = "") => {
     if (generatingId !== null) {
       return;
     }
     setGeneratingId(outlineId);
     message.info("正在生成大纲，请稍候（约需十几秒）…");
     try {
-      setItems(await outlineApi.generate(novelId, [outlineId]));
+      setItems(await outlineApi.generate(novelId, [outlineId], note));
       message.success("大纲已生成");
       // 生成大纲会产出有意义的章节名；若该规划已落地章节，通知父组件刷新章节列表
       onChanged?.();
@@ -213,6 +276,162 @@ export default function OutlineTab({
       message.error(e?.message ?? "生成失败");
     } finally {
       setGeneratingId(null);
+    }
+  };
+
+  // ===== 伏笔账本：跨章节悬念登记（OPEN 条目自动注入大纲/正文生成 prompt） =====
+
+  const loadForeshadows = useCallback(async () => {
+    setFsLoading(true);
+    try {
+      setFsItems(await foreshadowApi.list(novelId));
+    } catch (e: any) {
+      message.error(e?.message ?? "伏笔账本加载失败");
+    } finally {
+      setFsLoading(false);
+    }
+  }, [novelId]);
+
+  // 挂载即取一次：工具栏角标需要未回收条数
+  useEffect(() => {
+    void loadForeshadows();
+  }, [loadForeshadows]);
+
+  const resetFsForm = () => {
+    setFsEditingId(null);
+    setFsTitle("");
+    setFsContent("");
+    setFsPlanted(null);
+    setFsExpected(null);
+  };
+
+  const submitForeshadow = async () => {
+    if (!fsTitle.trim()) {
+      message.warning("请填写伏笔名");
+      return;
+    }
+    setFsSaving(true);
+    try {
+      const req = {
+        title: fsTitle.trim(),
+        content: fsContent.trim() || null,
+        plantedOrder: fsPlanted,
+        expectedOrder: fsExpected,
+      };
+      if (fsEditingId != null) {
+        await foreshadowApi.update(novelId, fsEditingId, req);
+        message.success("伏笔已更新");
+      } else {
+        await foreshadowApi.create(novelId, req);
+        message.success("伏笔已登记，生成大纲/正文时会自动带入");
+      }
+      resetFsForm();
+      await loadForeshadows();
+    } catch (e: any) {
+      message.error(e?.message ?? "保存失败");
+    } finally {
+      setFsSaving(false);
+    }
+  };
+
+  const editForeshadow = (f: ForeshadowingItem) => {
+    setFsEditingId(f.id);
+    setFsTitle(f.title);
+    setFsContent(f.content ?? "");
+    setFsPlanted(f.plantedOrder);
+    setFsExpected(f.expectedOrder);
+  };
+
+  const changeForeshadowStatus = async (f: ForeshadowingItem, status: ForeshadowingItem["status"]) => {
+    try {
+      await foreshadowApi.changeStatus(novelId, f.id, status, null);
+      message.success(
+        status === "RESOLVED" ? "已标记回收" : status === "ABANDONED" ? "已标记放弃" : "已重新打开",
+      );
+      await loadForeshadows();
+    } catch (e: any) {
+      message.error(e?.message ?? "操作失败");
+    }
+  };
+
+  const removeForeshadow = (f: ForeshadowingItem) => {
+    Modal.confirm({
+      title: `确定删除伏笔「${f.title}」？`,
+      content: "删除后不再注入生成上下文；如只是不再回收，建议用「放弃」保留记录。",
+      okText: "删除",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          await foreshadowApi.remove(novelId, f.id);
+          message.success("已删除");
+          await loadForeshadows();
+        } catch (e: any) {
+          message.error(e?.message ?? "删除失败");
+        }
+      },
+    });
+  };
+
+  // ===== 半自动伏笔记账：正文生成完成后 AI 提炼「新埋 / 已回收」建议，作者勾选后才写入 =====
+
+  /** 弹出建议确认卡（仅当确有建议时）；chapterOrder 用于回收章回填 */
+  const openSuggestModal = (
+    suggest: ForeshadowSuggest,
+    chapterLabel: string,
+    chapterOrder: number | null,
+  ) => {
+    const newItems = suggest.newItems.map((n) => ({ ...n, checked: true }));
+    const resolved = suggest.resolved.map((r) => ({
+      ...r,
+      checked: true,
+      resolvedOrder: r.resolvedOrder ?? chapterOrder,
+    }));
+    if (newItems.length === 0 && resolved.length === 0) {
+      return;
+    }
+    setSuggChapter(chapterLabel);
+    setSuggNew(newItems);
+    setSuggResolved(resolved);
+    setSuggOpen(true);
+  };
+
+  /** 静默请求记账建议：网络层失败也降级为 null，绝不打扰生成主流程 */
+  const fetchSuggest = async (chapterId: number | null | undefined) => {
+    if (!chapterId) {
+      return null;
+    }
+    try {
+      return await foreshadowApi.suggest(novelId, chapterId);
+    } catch {
+      return null;
+    }
+  };
+
+  /** 应用勾选的建议：新伏笔逐条登记、回收逐条标记 RESOLVED；完成后刷新账本角标 */
+  const applySuggest = async () => {
+    setSuggApplying(true);
+    try {
+      let n = 0;
+      for (const it of suggNew.filter((x) => x.checked)) {
+        await foreshadowApi.create(novelId, {
+          title: it.title,
+          content: it.content,
+          plantedOrder: it.plantedOrder,
+          expectedOrder: null,
+        });
+        n++;
+      }
+      for (const it of suggResolved.filter((x) => x.checked)) {
+        await foreshadowApi.changeStatus(novelId, it.id, "RESOLVED", it.resolvedOrder);
+        n++;
+      }
+      message.success(n > 0 ? `伏笔记账完成：已写入 ${n} 条` : "未选择任何建议");
+      setSuggOpen(false);
+      await loadForeshadows();
+    } catch (e: any) {
+      message.error(e?.message ?? "记账失败，请到伏笔账本手动处理");
+    } finally {
+      setSuggApplying(false);
     }
   };
 
@@ -391,7 +610,7 @@ export default function OutlineTab({
    * - append=true：从本章当前内容末尾**接着写**（只增不重）
    * 两种模式都会留版本快照，可回滚。
    */
-  const writeOne = async (item: ChapterOutlineItem, append = false) => {
+  const writeOne = async (item: ChapterOutlineItem, append = false, note = "") => {
     setWriteOpen(true);
     setWriteTitle(
       append
@@ -405,7 +624,7 @@ export default function OutlineTab({
         `/api/ai/novels/${novelId}/outlines/${item.outlineId}/${
           append ? "write-continue" : "write"
         }`,
-        { totalChapters: items.length },
+        { totalChapters: items.length, authorNote: note.trim() || undefined },
         {
           onDelta: (d) => setWriteText((t) => t + d),
         },
@@ -413,10 +632,15 @@ export default function OutlineTab({
       message.success(append ? "已接着写完并保存" : "正文已生成并保存");
       // 重新拉取：本条规划刚落地出章节，需取到真实 chapterId 供「去阅读」使用
       await load();
-      setLastWrittenId(
-        (await outlineApi.list(novelId)).find((x) => x.outlineId === item.outlineId)?.chapterId ?? null,
-      );
+      const freshId =
+        (await outlineApi.list(novelId)).find((x) => x.outlineId === item.outlineId)?.chapterId ?? null;
+      setLastWrittenId(freshId);
       onChanged?.();
+      // 半自动伏笔记账：本章写完后请求 AI 建议（静默，仅确有建议时弹确认卡）
+      const suggest = await fetchSuggest(freshId);
+      if (suggest) {
+        openSuggestModal(suggest, `第${item.chapterOrder}章《${item.chapterTitle}》`, item.chapterOrder);
+      }
     } catch (e: any) {
       message.error(e?.message ?? "生成失败");
     } finally {
@@ -426,39 +650,25 @@ export default function OutlineTab({
     }
   };
 
-  /** 从当前内容接着写（追加，不覆盖）：仅在已有正文时可用 */
+  /** 从当前内容接着写（追加，不覆盖）：仅在已有正文时可用；先经「作者有话说」弹窗再开始 */
   const continueWrite = (item: ChapterOutlineItem) => {
     if (!item.hasContent) {
       message.info("本章还没有正文，直接用「生成正文」写一整章即可");
       return;
     }
-    writeOne(item, true);
+    setWriteCfgTarget({ mode: "one", item, append: true });
   };
 
-  /** 生成前覆盖确认：章节已有正文时弹窗提示（说明是整章重写），否则直接生成 */
+  /**
+   * 生成前弹窗：填写「作者有话说」（可选）后开始生成。
+   * 章节已有正文时弹窗内提示整章重写（旧内容自动留版本快照，可回滚），否则直接进入填写。
+   */
   const confirmWrite = (item: ChapterOutlineItem) => {
-    if (item.hasContent) {
-      const inst = Modal.confirm({
-        title: "覆盖确认",
-        content:
-          "将基于本章大纲**整章重写**（忽略当前正文，从上一章结尾重新写）。旧内容会自动留版本快照，可回滚；也可以取消后用「更多 → 从当前内容接着写」在原文后追加。确定继续？",
-        okText: "整章重写",
-        cancelText: "取消",
-        okButtonProps: { danger: true },
-        maskClosable: true,
-        onOk: () => {
-          // 确认后立即关闭提示，避免与正文生成弹窗叠加
-          inst.destroy();
-          writeOne(item);
-        },
-      });
-    } else {
-      writeOne(item);
-    }
+    setWriteCfgTarget({ mode: "one", item, append: false });
   };
 
-  /** 一键为全部已规划大纲的章节生成正文（顺序执行）；仅在存在大纲时由按钮触发 */
-  const writeAll = async () => {
+  /** 一键为全部已规划大纲的章节生成正文（顺序执行）；「作者有话说」对每章生效 */
+  const writeAll = async (note = "") => {
     const targets = items.filter((i) => i.hasOutline);
     if (targets.length === 0) {
       message.warning("还没有章节大纲，请先点「一键生成大纲」规划后再生成正文");
@@ -477,7 +687,7 @@ export default function OutlineTab({
         setWriteText("");
         await streamSse(
           `/api/ai/novels/${novelId}/outlines/${it.outlineId}/write`,
-          { totalChapters: targets.length },
+          { totalChapters: targets.length, authorNote: note.trim() || undefined },
           {
             onDelta: (d) => setWriteText((t) => t + d),
           },
@@ -490,6 +700,35 @@ export default function OutlineTab({
         fresh.find((x) => x.outlineId === targets[targets.length - 1]?.outlineId)?.chapterId ?? null,
       );
       onChanged?.();
+      // 半自动伏笔记账：整批写完后逐章收集建议，合并为一张确认卡（静默失败，不阻断）
+      const hide = message.loading("正在分析伏笔记账建议…", 0);
+      const mergedNew: (ForeshadowNewSuggest & { checked: boolean })[] = [];
+      const mergedResolved: (ForeshadowResolvedSuggest & { checked: boolean })[] = [];
+      const seenIds = new Set<number>();
+      for (const it of targets) {
+        const s = await fetchSuggest(fresh.find((x) => x.outlineId === it.outlineId)?.chapterId);
+        if (!s) {
+          continue;
+        }
+        s.newItems.forEach((n) => mergedNew.push({ ...n, checked: true }));
+        s.resolved.forEach((r) => {
+          if (!seenIds.has(r.id)) {
+            seenIds.add(r.id);
+            mergedResolved.push({
+              ...r,
+              checked: true,
+              resolvedOrder: r.resolvedOrder ?? it.chapterOrder,
+            });
+          }
+        });
+      }
+      hide();
+      if (mergedNew.length > 0 || mergedResolved.length > 0) {
+        setSuggChapter(`本次批量生成的 ${targets.length} 章`);
+        setSuggNew(mergedNew);
+        setSuggResolved(mergedResolved);
+        setSuggOpen(true);
+      }
     } catch (e: any) {
       message.error(`第${done} 章生成失败：${e?.message ?? "AI 服务暂时不可用"}`);
     } finally {
@@ -498,27 +737,9 @@ export default function OutlineTab({
     }
   };
 
-  /** 批量生成前覆盖确认：若任一目标章已有正文则弹窗，否则直接生成 */
+  /** 批量生成前弹窗：填写「作者有话说」（可选，对每章生效）；任一目标章已有正文时弹窗内提示覆盖 */
   const confirmWriteAll = () => {
-    const targets = items.filter((i) => i.hasOutline);
-    if (targets.some((i) => i.hasContent)) {
-      const inst = Modal.confirm({
-        title: "覆盖确认",
-        content:
-          "将为全部已规划大纲的章节生成正文；若某章已有正文，将被覆盖（已自动留版本快照，可回滚）。确定继续？",
-        okText: "生成正文",
-        cancelText: "取消",
-        okButtonProps: { danger: true },
-        maskClosable: true,
-        onOk: () => {
-          // 确认后立即关闭提示，避免与正文生成弹窗叠加
-          inst.destroy();
-          void writeAll();
-        },
-      });
-    } else {
-      writeAll();
-    }
+    setWriteCfgTarget({ mode: "all" });
   };
 
   return (
@@ -558,6 +779,17 @@ export default function OutlineTab({
               一键生成大纲{missing > 0 ? `（${missing} 条待生成）` : ""}
             </Button>
           </Tooltip>
+          <Badge
+            count={fsItems.filter((f) => f.status === "OPEN").length}
+            size="small"
+            offset={[-2, 6]}
+          >
+            <Tooltip title="伏笔账本：登记跨章节悬念。未回收条目会自动注入大纲/正文生成的 prompt，避免长程伏笔被 AI 遗忘">
+              <Button icon={<FlagOutlined />} onClick={() => setFsOpen(true)}>
+                伏笔账本
+              </Button>
+            </Tooltip>
+          </Badge>
           <Tooltip
             title={
               hasOutlines
@@ -604,7 +836,7 @@ export default function OutlineTab({
           description="大纲逐章生成中，可离开本页；每章一次 AI 调用，章数越多耗时越久。"
         />
       )}
-      {loading ? (
+      {items.length === 0 && loading ? (
         <Spin />
       ) : items.length === 0 ? (
         <Empty description="还没有大纲规划。点「一键生成大纲」由 AI 直接规划全书（自动创建规划行），或点「新增大纲」手动写一条；正文会在你点「生成正文」时才生成对应章节。" />
@@ -612,7 +844,8 @@ export default function OutlineTab({
         <Table
           rowKey="outlineId"
           dataSource={items}
-          pagination={false}
+          loading={loading}
+          pagination={LIST_PAGINATION}
           columns={[
             { title: "#", dataIndex: "chapterOrder", width: 60 },
             {
@@ -758,7 +991,8 @@ export default function OutlineTab({
                 r.hasOutline && r.outline ? (
                   <Paragraph
                     style={{ margin: 0, whiteSpace: "pre-wrap" }}
-                    ellipsis={{ rows: 3, expandable: true }}
+                    // expandable: "collapsible"：展开后显示「收起」，可再次折叠回 3 行
+                    ellipsis={{ rows: 3, expandable: "collapsible" }}
                   >
                     {r.outline}
                   </Paragraph>
@@ -777,7 +1011,7 @@ export default function OutlineTab({
                     icon={<RobotOutlined />}
                     loading={generatingId === r.outlineId}
                     disabled={generatingId !== null}
-                    onClick={() => generateOne(r.outlineId)}
+                    onClick={() => openOutlineCfg(r)}
                   >
                     {r.hasOutline ? "重生成" : "生成"}
                   </Button>
@@ -842,7 +1076,7 @@ export default function OutlineTab({
                         } else if (key === "read" && r.chapterId) {
                           navigate(`/read/${r.chapterId}`);
                         } else if (key === "generate") {
-                          r.hasContent ? confirmWrite(r) : writeOne(r);
+                          confirmWrite(r);
                         }
                       },
                     }}
@@ -857,6 +1091,376 @@ export default function OutlineTab({
           ]}
         />
       )}
+      {/* 伏笔账本：跨章节悬念登记；OPEN 条目自动注入大纲/正文生成的 prompt */}
+      <Drawer
+        title="伏笔账本"
+        // 桌面 960px 保证「埋设描述」列有充足空间；小屏回退到 92vw 防溢出
+        width="min(960px, 92vw)"
+        open={fsOpen}
+        onClose={() => setFsOpen(false)}
+        destroyOnHidden
+      >
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 14 }}
+          message="未回收的伏笔会自动注入大纲与正文生成的上下文，AI 会优先承接并在合适的章节回收——解决「很多章之前埋的悬念被遗忘」的问题。"
+        />
+        <div
+          style={{
+            marginBottom: 16,
+            padding: 12,
+            border: "1px solid #f0f0f0",
+            borderRadius: 8,
+            background: "#fafafa",
+          }}
+        >
+          <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
+            {fsEditingId != null ? `编辑伏笔（#${fsEditingId}）` : "登记新伏笔"}
+          </div>
+          <Input
+            placeholder="伏笔名（如：师父的身世之谜）"
+            value={fsTitle}
+            onChange={(e) => setFsTitle(e.target.value)}
+            maxLength={60}
+            showCount
+            style={{ marginBottom: 8 }}
+          />
+          <Input.TextArea
+            placeholder="埋设描述：埋了什么、以什么形式呈现、回收时应给出什么（可选）"
+            value={fsContent}
+            onChange={(e) => setFsContent(e.target.value)}
+            maxLength={500}
+            showCount
+            autoSize={{ minRows: 2, maxRows: 4 }}
+            style={{ marginBottom: 8 }}
+          />
+          <Space style={{ marginBottom: 8 }} wrap size={4}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+              <span className="muted" style={{ fontSize: 12 }}>埋于第</span>
+              <InputNumber
+                min={1}
+                max={10000}
+                value={fsPlanted}
+                onChange={(v) => setFsPlanted(v == null ? null : Number(v))}
+                placeholder="可空"
+                style={{ width: 110 }}
+              />
+              <span className="muted" style={{ fontSize: 12 }}>章</span>
+            </span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+              <span className="muted" style={{ fontSize: 12 }}>预期第</span>
+              <InputNumber
+                min={1}
+                max={10000}
+                value={fsExpected}
+                onChange={(v) => setFsExpected(v == null ? null : Number(v))}
+                placeholder="可空"
+                style={{ width: 110 }}
+              />
+              <span className="muted" style={{ fontSize: 12 }}>章前后回收</span>
+            </span>
+          </Space>
+          <div>
+            <Button type="primary" loading={fsSaving} onClick={submitForeshadow}>
+              {fsEditingId != null ? "保存修改" : "登记"}
+            </Button>
+            {fsEditingId != null && (
+              <Button style={{ marginLeft: 8 }} onClick={resetFsForm}>
+                取消编辑
+              </Button>
+            )}
+          </div>
+        </div>
+        <Table
+          size="small"
+          rowKey="id"
+          loading={fsLoading}
+          dataSource={fsItems}
+          pagination={LIST_PAGINATION}
+          locale={{
+            emptyText: (
+              <Empty description="还没有登记伏笔。埋设悬念后登记在这里，AI 生成时就不会遗忘" />
+            ),
+          }}
+          columns={[
+            {
+              title: "埋设章",
+              dataIndex: "plantedOrder",
+              width: 70,
+              render: (v: number | null) => v ?? "—",
+            },
+            {
+              title: "伏笔名",
+              dataIndex: "title",
+              width: 160,
+              render: (t: string, r: ForeshadowingItem) => (
+                <Tooltip title={r.content ?? t}>
+                  <span style={{ fontWeight: 500 }}>{t}</span>
+                </Tooltip>
+              ),
+            },
+            {
+              title: "埋设描述",
+              dataIndex: "content",
+              render: (c: string | null) =>
+                c ? (
+                  <Paragraph
+                    style={{ margin: 0, whiteSpace: "pre-wrap" }}
+                    ellipsis={{ rows: 2, expandable: "collapsible" }}
+                  >
+                    {c}
+                  </Paragraph>
+                ) : (
+                  <span className="muted">—</span>
+                ),
+            },
+            {
+              title: "预期回收",
+              dataIndex: "expectedOrder",
+              width: 80,
+              render: (v: number | null) => (v == null ? "—" : `第 ${v} 章`),
+            },
+            {
+              title: "状态",
+              dataIndex: "status",
+              width: 110,
+              render: (s: ForeshadowingItem["status"], r: ForeshadowingItem) =>
+                s === "OPEN" ? (
+                  <Tag color="orange">未回收</Tag>
+                ) : s === "RESOLVED" ? (
+                  <Tag color="green">已回收{r.resolvedOrder ? `·第${r.resolvedOrder}章` : ""}</Tag>
+                ) : (
+                  <Tag>已放弃</Tag>
+                ),
+            },
+            {
+              title: "操作",
+              width: 190,
+              render: (_: any, r: ForeshadowingItem) => (
+                <Space size={0}>
+                  <Button type="link" size="small" icon={<EditOutlined />} onClick={() => editForeshadow(r)}>
+                    编辑
+                  </Button>
+                  {r.status === "OPEN" && (
+                    <>
+                      <Button
+                        type="link"
+                        size="small"
+                        onClick={() => changeForeshadowStatus(r, "RESOLVED")}
+                      >
+                        标记回收
+                      </Button>
+                      <Button
+                        type="link"
+                        size="small"
+                        onClick={() => changeForeshadowStatus(r, "ABANDONED")}
+                      >
+                        放弃
+                      </Button>
+                    </>
+                  )}
+                  {r.status !== "OPEN" && (
+                    <Button type="link" size="small" onClick={() => changeForeshadowStatus(r, "OPEN")}>
+                      重新打开
+                    </Button>
+                  )}
+                  <Button type="link" size="small" danger icon={<DeleteOutlined />} onClick={() => removeForeshadow(r)} />
+                </Space>
+              ),
+            },
+          ]}
+        />
+      </Drawer>
+      {/* 生成正文前设置：填写「作者有话说」（可选）对创作加以干预，同时承担覆盖确认职责 */}
+      <Modal
+        title={
+          writeCfgTarget?.mode === "all"
+            ? `一键生成正文（${items.filter((i) => i.hasOutline).length} 章）`
+            : writeCfgTarget?.mode === "one"
+              ? writeCfgTarget.append
+                ? `AI 接着写 · 第${writeCfgTarget.item.chapterOrder}章《${writeCfgTarget.item.chapterTitle}》`
+                : `AI 生成正文 · 第${writeCfgTarget.item.chapterOrder}章《${writeCfgTarget.item.chapterTitle}》`
+              : ""
+        }
+        open={writeCfgTarget !== null}
+        onCancel={() => setWriteCfgTarget(null)}
+        onOk={() => {
+          const t = writeCfgTarget;
+          if (!t) return;
+          setWriteCfgTarget(null);
+          if (t.mode === "all") {
+            void writeAll(authorNote);
+          } else {
+            void writeOne(t.item, t.append, authorNote);
+          }
+        }}
+        okText={writeCfgTarget?.mode === "one" && writeCfgTarget.append ? "开始接着写" : "开始生成"}
+        cancelText="取消"
+        width={560}
+        maskClosable={true}
+        destroyOnHidden
+      >
+        {writeCfgTarget?.mode === "one" && !writeCfgTarget.append && writeCfgTarget.item.hasContent && (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message="将基于本章大纲整章重写（忽略当前正文，从上一章结尾重新写）。旧内容会自动留版本快照，可回滚；想追加请用「更多 → 从当前内容接着写」。"
+          />
+        )}
+        {writeCfgTarget?.mode === "one" && writeCfgTarget.append && (
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message="将从本章当前内容末尾接着写（只增不重）。"
+          />
+        )}
+        {writeCfgTarget?.mode === "all" && (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message="将为全部已规划大纲的章节按顺序生成正文；若某章已有正文，将被覆盖（已自动留版本快照，可回滚）。"
+          />
+        )}
+        <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
+          作者有话说（可选，AI 将优先遵循）
+        </div>
+        <Input.TextArea
+          value={authorNote}
+          onChange={(e) => setAuthorNote(e.target.value)}
+          placeholder={
+            "向 AI 交代你对本章的要求，例如：\n· 本章重点写主角与反派的正面交锋，感情线先按下不表；\n· 多写对话，节奏紧凑，不要大段环境描写；\n· 某配角本章不要出场 / 结尾留在悬念上。"
+          }
+          maxLength={500}
+          showCount
+          autoSize={{ minRows: 4, maxRows: 8 }}
+        />
+      </Modal>
+      {/* 生成大纲前设置：填写「作者有话说」（可选）对规划加以干预（单条 / 一键补全） */}
+      <Modal
+        title={
+          outlineCfgTarget?.kind === "one"
+            ? outlineCfgTarget.title
+            : outlineCfgTarget?.kind === "all"
+              ? `一键生成大纲（${missing} 条待生成）`
+              : ""
+        }
+        open={outlineCfgTarget !== null}
+        onCancel={() => setOutlineCfgTarget(null)}
+        onOk={() => {
+          const t = outlineCfgTarget;
+          if (!t) return;
+          setOutlineCfgTarget(null);
+          if (t.kind === "all") {
+            void startTask({ authorNote: outlineNote.trim() || undefined });
+          } else {
+            void generateOne(t.outlineId, outlineNote);
+          }
+        }}
+        okText="开始生成"
+        cancelText="取消"
+        width={560}
+        maskClosable={true}
+        destroyOnHidden
+      >
+        {outlineCfgTarget?.kind === "all" && (
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message={`将为所有大纲内容为空的规划行生成章节名与写作大纲（共 ${missing} 条）；每章一次 AI 调用，开始后可离开本页，进度自动刷新。`}
+          />
+        )}
+        <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
+          作者有话说（可选，AI 将优先遵循）
+        </div>
+        <Input.TextArea
+          value={outlineNote}
+          onChange={(e) => setOutlineNote(e.target.value)}
+          placeholder={
+            "向 AI 交代你对本章规划的要求，例如：\n· 本章必须出现主角获得关键道具的事件；\n· 回收伏笔账本里第 3 章埋的「师父的身世」；\n· 本章不要安排感情戏，重点推进势力冲突。"
+          }
+          maxLength={500}
+          showCount
+          autoSize={{ minRows: 4, maxRows: 8 }}
+        />
+      </Modal>
+      {/* 半自动伏笔记账：AI 对刚写完的正文提炼的建议，作者勾选确认后才写入账本 */}
+      <Modal
+        title={suggChapter ? `伏笔记账建议 · ${suggChapter}` : "伏笔记账建议"}
+        open={suggOpen}
+        onCancel={() => setSuggOpen(false)}
+        onOk={applySuggest}
+        okButtonProps={{ disabled: suggApplying }}
+        confirmLoading={suggApplying}
+        okText="写入账本"
+        cancelText="忽略"
+        width={560}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {suggNew.length > 0 && (
+            <div>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>AI 认为本章埋下了以下悬念（建议登记）</div>
+              {suggNew.map((n, i) => (
+                <label
+                  key={i}
+                  style={{ display: "flex", gap: 8, alignItems: "flex-start", padding: "4px 0", cursor: "pointer" }}
+                >
+                  <Checkbox
+                    checked={n.checked}
+                    onChange={(e) =>
+                      setSuggNew((arr) => arr.map((x, j) => (j === i ? { ...x, checked: e.target.checked } : x)))
+                    }
+                    style={{ marginTop: 4 }}
+                  />
+                  <span>
+                    <b>{n.title}</b>
+                    {n.content && (
+                      <span style={{ color: "var(--text-secondary, #888)" }}>：{n.content}</span>
+                    )}
+                    {n.plantedOrder != null && (
+                      <span style={{ color: "var(--text-secondary, #888)" }}>（埋于第 {n.plantedOrder} 章）</span>
+                    )}
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+          {suggResolved.length > 0 && (
+            <div>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>AI 认为以下伏笔在本章已回收（建议标记）</div>
+              {suggResolved.map((r, i) => (
+                <label
+                  key={r.id}
+                  style={{ display: "flex", gap: 8, alignItems: "flex-start", padding: "4px 0", cursor: "pointer" }}
+                >
+                  <Checkbox
+                    checked={r.checked}
+                    onChange={(e) =>
+                      setSuggResolved((arr) =>
+                        arr.map((x, j) => (j === i ? { ...x, checked: e.target.checked } : x)),
+                      )
+                    }
+                    style={{ marginTop: 4 }}
+                  />
+                  <span>
+                    <b>{r.title}</b>
+                    {r.resolvedOrder != null && (
+                      <span style={{ color: "var(--text-secondary, #888)" }}>（回收于第 {r.resolvedOrder} 章）</span>
+                    )}
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            以上为 AI 分析建议，仅勾选项会写入伏笔账本；也可以忽略，稍后在「伏笔账本」中手动维护。
+          </Typography.Text>
+        </div>
+      </Modal>
       <Modal
         title={writeTitle || "AI 生成正文"}
         open={writeOpen}
@@ -948,14 +1552,31 @@ export default function OutlineTab({
             规划章节数（按全书目标 {targetWords ? targetWords.toLocaleString() : 0} 字 ÷
             每章约 3,000 字估算，可修改）
           </div>
-          <InputNumber
-            min={1}
-            max={100}
-            step={1}
-            value={planChapters}
-            onChange={(v) => setPlanChapters(Number(v) || 1)}
-            style={{ width: 150 }}
-            addonAfter="章"
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+            <InputNumber
+              min={1}
+              max={100}
+              step={1}
+              value={planChapters}
+              onChange={(v) => setPlanChapters(Number(v) || 1)}
+              style={{ width: 110 }}
+            />
+            <span className="muted" style={{ fontSize: 12 }}>章</span>
+          </span>
+        </div>
+        <div style={{ marginTop: 14 }}>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
+            作者有话说（可选，AI 将优先遵循，对每章规划生效）
+          </div>
+          <Input.TextArea
+            value={outlineNote}
+            onChange={(e) => setOutlineNote(e.target.value)}
+            placeholder={
+              "向 AI 交代全书规划的要求，例如：\n· 每 3 章左右安排一次小高潮；\n· 女主在第 5 章前不要登场；\n· 各章结尾都留悬念，但第 10 章给一个阶段性收束。"
+            }
+            maxLength={500}
+            showCount
+            autoSize={{ minRows: 3, maxRows: 8 }}
           />
         </div>
       </Modal>
@@ -1008,15 +1629,17 @@ export default function OutlineTab({
             <span className="muted" style={{ fontSize: 12 }}>
               本章目标字数：
             </span>
-            <InputNumber
-              min={100}
-              max={20000}
-              step={100}
-              value={newWords}
-              onChange={(v) => setNewWords(Number(v) || 0)}
-              style={{ width: 110 }}
-              addonAfter="字"
-            />
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+              <InputNumber
+                min={100}
+                max={20000}
+                step={100}
+                value={newWords}
+                onChange={(v) => setNewWords(Number(v) || 0)}
+                style={{ width: 110 }}
+              />
+              <span className="muted" style={{ fontSize: 12 }}>字</span>
+            </span>
             <span className="muted" style={{ fontSize: 12 }}>
               留空则沿用全书均摊值
             </span>
@@ -1079,15 +1702,17 @@ export default function OutlineTab({
               <span className="muted" style={{ fontSize: 12 }}>
                 本章目标字数：
               </span>
-              <InputNumber
-                min={100}
-                max={20000}
-                step={100}
-                value={editWords}
-                onChange={(v) => setEditWords(Number(v) || 0)}
-                style={{ width: 110 }}
-                addonAfter="字"
-              />
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                <InputNumber
+                  min={100}
+                  max={20000}
+                  step={100}
+                  value={editWords}
+                  onChange={(v) => setEditWords(Number(v) || 0)}
+                  style={{ width: 110 }}
+                />
+                <span className="muted" style={{ fontSize: 12 }}>字</span>
+              </span>
               {editing.wordCountCustomized && (
                 <Button
                   size="small"

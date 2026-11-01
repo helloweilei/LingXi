@@ -212,11 +212,19 @@ public class MemoryService {
      */
     @Transactional
     public List<OutlineItemVO> generate(Long novelId, User user, List<Long> outlineIds) {
+        return generate(novelId, user, outlineIds, null);
+    }
+
+    /**
+     * 同上，支持「作者有话说」：note 非空时以最高优先级注入每章的大纲生成 prompt。
+     */
+    @Transactional
+    public List<OutlineItemVO> generate(Long novelId, User user, List<Long> outlineIds, String authorNote) {
         List<ChapterOutline> targets = resolveTargetOutlines(novelId, user, outlineIds);
         int ok = 0;
         for (ChapterOutline o : targets) {
             try {
-                aiService.generateChapterOutline(novelId, o.getId(), user).blockLast();
+                aiService.generateChapterOutline(novelId, o.getId(), user, null, authorNote).blockLast();
                 ok++;
             } catch (Exception ignored) {
                 // 单章生成失败：跳过，不阻塞其余章节

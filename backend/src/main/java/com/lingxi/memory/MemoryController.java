@@ -72,7 +72,8 @@ public class MemoryController {
     public ApiResponse<List<OutlineItemVO>> generate(@AuthenticationPrincipal User user, @PathVariable Long novelId,
                                                      @RequestBody(required = false) GenerateReq req) {
         List<Long> ids = req == null ? null : req.outlineIds();
-        return ApiResponse.ok(memoryService.generate(novelId, user, ids));
+        String authorNote = req == null ? null : req.authorNote();
+        return ApiResponse.ok(memoryService.generate(novelId, user, ids, authorNote));
     }
 
     /**

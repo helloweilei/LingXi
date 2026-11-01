@@ -42,8 +42,11 @@ public final class MemoryDtos {
                                 LocalDateTime updatedAt) {
     }
 
-    /** 批量生成大纲请求：指定 outlineIds 则只生成这些；留空则生成全书尚无大纲内容的规划行 */
-    public record GenerateReq(List<Long> outlineIds) {
+    /**
+     * 批量生成大纲请求：指定 outlineIds 则只生成这些；留空则生成全书尚无大纲内容的规划行。
+     * authorNote：「作者有话说」——作者对大纲规划的干预要求（重点情节、埋伏笔、禁区等），非空时最高优先级注入。
+     */
+    public record GenerateReq(List<Long> outlineIds, String authorNote) {
     }
 
     /**
@@ -69,5 +72,45 @@ public final class MemoryDtos {
     public record ChapterWordsReq(
             @Min(value = 0, message = "字数不能为负数")
             @Max(value = 20000, message = "本章目标字数最多 20000 字") Integer words) {
+    }
+
+    /** 伏笔账本条目（OPEN=未回收；RESOLVED=已回收；ABANDONED=已放弃） */
+    public record ForeshadowingVO(Long id, String title, String content, Integer plantedOrder,
+                                  Integer expectedOrder, String status, Integer resolvedOrder,
+                                  LocalDateTime updatedAt) {
+    }
+
+    /** 新增/编辑伏笔：字段为 null 表示编辑时不改该字段；plantedOrder/expectedOrder 可为空（全书级伏笔） */
+    public record ForeshadowReq(
+            @Size(max = 60, message = "伏笔名最长 60 字") String title,
+            @Size(max = 500, message = "埋设描述最长 500 字") String content,
+            @Min(value = 1, message = "章序最小为 1")
+            @Max(value = 10000, message = "章序过大") Integer plantedOrder,
+            @Min(value = 1, message = "章序最小为 1")
+            @Max(value = 10000, message = "章序过大") Integer expectedOrder) {
+    }
+
+    /** 伏笔状态变更：status 必填；标记 RESOLVED 时建议带 resolvedOrder（实际回收章） */
+    public record ForeshadowStatusReq(String status, Integer resolvedOrder) {
+    }
+
+    /** 半自动记账建议——AI 提炼到的新埋伏笔（尚未落库，作者确认后写入账本） */
+    public record ForeshadowNewVO(String title, String content, Integer plantedOrder) {
+    }
+
+    /** 半自动记账建议——AI 判定本章已回收的伏笔（引用账本既有条目，作者确认后标记 RESOLVED） */
+    public record ForeshadowResolvedVO(Long id, String title, Integer resolvedOrder) {
+    }
+
+    /** 正文生成完成后的伏笔记账建议：newItems=建议登记的新伏笔；resolved=建议标记已回收的既有伏笔 */
+    public record ForeshadowSuggestVO(List<ForeshadowNewVO> newItems, List<ForeshadowResolvedVO> resolved) {
+
+        public static ForeshadowSuggestVO empty() {
+            return new ForeshadowSuggestVO(List.of(), List.of());
+        }
+
+        public boolean isEmpty() {
+            return newItems.isEmpty() && resolved.isEmpty();
+        }
     }
 }

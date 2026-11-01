@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
+  Badge,
   Button,
   Input,
   Modal,
@@ -16,10 +17,11 @@ import {
   EditOutlined,
   RobotOutlined,
   UploadOutlined,
+  VideoCameraOutlined,
 } from "@ant-design/icons";
 import { useNavigate, useParams } from "react-router-dom";
 import dayjs from "dayjs";
-import { novelApi, uploadApi } from "../api";
+import { novelApi, uploadApi, videoPromptApi, type VideoPromptVO } from "../api";
 import { streamSse } from "../api/ai";
 import type { NovelDetail } from "../api/types";
 import AiDrawer from "../components/AiDrawer";
@@ -31,6 +33,7 @@ import NovelChatTab from "../components/NovelChatTab";
 import NovelOutlinesTab from "../components/NovelOutlinesTab";
 import NovelWorldTab from "../components/NovelWorldTab";
 import NovelFormModal, { styleToArray } from "../components/NovelFormModal";
+import VideoPromptModal from "../components/VideoPromptModal";
 
 export default function NovelDetail() {
   const { id } = useParams();
@@ -41,8 +44,23 @@ export default function NovelDetail() {
   const [editOpen, setEditOpen] = useState(false);
   const [outlineOpen, setOutlineOpen] = useState(false);
   const [coverOpen, setCoverOpen] = useState(false);
+  const [videoOpen, setVideoOpen] = useState(false);
+  /** 已生成的视频提示词：章节分镜角标 + 宣传片入口角标的数据源 */
+  const [videoPrompts, setVideoPrompts] = useState<VideoPromptVO[]>([]);
   const [outline, setOutline] = useState("");
   const [chapterRefresh, setChapterRefresh] = useState(0);
+
+  const loadVideoPrompts = useCallback(async () => {
+    try {
+      setVideoPrompts(await videoPromptApi.list(novelId));
+    } catch {
+      /* 角标属锦上添花，加载失败不打断页面 */
+    }
+  }, [novelId]);
+
+  useEffect(() => {
+    loadVideoPrompts();
+  }, [loadVideoPrompts]);
 
   const load = useCallback(async () => {
     const n = await novelApi.detail(novelId);
@@ -85,6 +103,9 @@ export default function NovelDetail() {
         )
       : null;
 
+  /** 宣传片提示词是否已生成过（chapterId 为空的那条） */
+  const trailerSaved = videoPrompts.some((p) => p.chapterId === null);
+
   return (
     <div className="page-container">
       <Button
@@ -107,14 +128,14 @@ export default function NovelDetail() {
                 .map((g) => g.trim())
                 .filter(Boolean)
                 .map((g, i) => (
-                  <Tag key={i} color="purple">
+                  <Tag key={`genre-${i}`} color="purple">
                     {g}
                   </Tag>
                 ))}
               <Tag>{novel.status ?? "草稿"}</Tag>
               {styleToArray(novel.languageStyle).map((s, i) => (
                 <Tag
-                  key={i}
+                  key={`style-${i}`}
                   color="cyan"
                   title={s}
                   style={{ maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", verticalAlign: "middle" }}
@@ -129,6 +150,15 @@ export default function NovelDetail() {
               >
                 编辑信息
               </Button>
+              <Badge dot={!!trailerSaved} color="#6a5acd" offset={[-4, 6]}>
+                <Button
+                  type="link"
+                  icon={<VideoCameraOutlined />}
+                  onClick={() => setVideoOpen(true)}
+                >
+                  视频提示词
+                </Button>
+              </Badge>
             </Space>
             <p className="muted" style={{ margin: "10px 0 0", maxWidth: 760 }}>
               {novel.description ||
@@ -177,6 +207,10 @@ export default function NovelDetail() {
                 novelId={novelId}
                 refreshKey={chapterRefresh}
                 totalWords={novel.wordCount ?? 0}
+                videoChapterIds={videoPrompts
+                  .filter((p) => p.chapterId !== null)
+                  .map((p) => p.chapterId as number)}
+                onVideoChanged={loadVideoPrompts}
               />
             ),
           },
@@ -244,6 +278,7 @@ export default function NovelDetail() {
       <NovelFormModal
         open={editOpen}
         editing={novel}
+        outline={novel.outline}
         onClose={() => setEditOpen(false)}
         onSaved={(n) => {
           setNovel((prev) =>
@@ -268,6 +303,14 @@ export default function NovelDetail() {
           setCoverOpen(false);
           message.success("封面已更新");
         }}
+      />
+      <VideoPromptModal
+        open={videoOpen}
+        novelId={novel.id}
+        novelTitle={novel.title}
+        chapter={null}
+        onClose={() => setVideoOpen(false)}
+        onChanged={loadVideoPrompts}
       />
       <AiDrawer
         open={outlineOpen}

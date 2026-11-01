@@ -6,6 +6,7 @@ import com.lingxi.character.CharacterRelationRepository;
 import com.lingxi.character.CharacterRepository;
 import com.lingxi.common.BizException;
 import com.lingxi.memory.ChapterOutlineRepository;
+import com.lingxi.memory.ForeshadowingRepository;
 import com.lingxi.memory.StoryMemoryRepository;
 import com.lingxi.novel.dto.NovelDtos.CreateReq;
 import com.lingxi.novel.dto.NovelDtos.DetailVO;
@@ -35,12 +36,14 @@ public class NovelService {
     private final WorldSettingRepository worldSettingRepository;
     private final ChapterOutlineRepository chapterOutlineRepository;
     private final StoryMemoryRepository storyMemoryRepository;
+    private final ForeshadowingRepository foreshadowingRepository;
 
     public NovelService(NovelRepository novelRepository, ChapterRepository chapterRepository,
                         ChapterVersionRepository chapterVersionRepository,
                         CharacterRepository characterRepository, CharacterRelationRepository characterRelationRepository,
                         WorldSettingRepository worldSettingRepository,
-                        ChapterOutlineRepository chapterOutlineRepository, StoryMemoryRepository storyMemoryRepository) {
+                        ChapterOutlineRepository chapterOutlineRepository, StoryMemoryRepository storyMemoryRepository,
+                        ForeshadowingRepository foreshadowingRepository) {
         this.novelRepository = novelRepository;
         this.chapterRepository = chapterRepository;
         this.chapterVersionRepository = chapterVersionRepository;
@@ -49,6 +52,7 @@ public class NovelService {
         this.worldSettingRepository = worldSettingRepository;
         this.chapterOutlineRepository = chapterOutlineRepository;
         this.storyMemoryRepository = storyMemoryRepository;
+        this.foreshadowingRepository = foreshadowingRepository;
     }
 
     public List<VO> list(User user) {
@@ -129,6 +133,7 @@ public class NovelService {
         worldSettingRepository.deleteByNovelId(novelId);
         chapterOutlineRepository.deleteByNovelId(novelId);
         storyMemoryRepository.deleteByNovelId(novelId);
+        foreshadowingRepository.deleteByNovelId(novelId);
         novelRepository.delete(novel);
     }
 

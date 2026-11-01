@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Button, Card, Col, Empty, Modal, Popconfirm, Row, Space, Statistic, Tag, message } from 'antd';
-import { BulbOutlined, DeleteOutlined, HistoryOutlined, PlusOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { BulbOutlined, DeleteOutlined, HistoryOutlined, PlusOutlined, ThunderboltOutlined, VideoCameraOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
 import { novelApi } from '../api';
@@ -71,6 +71,9 @@ export default function Dashboard() {
             }}
           >
             创作助手
+          </Button>
+          <Button icon={<VideoCameraOutlined />} onClick={() => navigate('/video-studio')}>
+            视频提示词
           </Button>
           <Button type="primary" icon={<BulbOutlined />} onClick={() => navigate('/guide')}>
             灵感启发

@@ -123,6 +123,38 @@ export interface OutlineTaskVO {
   updatedAt: string;
 }
 
+/** 伏笔账本：跨章节悬念的结构化登记；OPEN 条目会注入大纲/正文生成的 prompt */
+export interface ForeshadowingItem {
+  id: number;
+  title: string;
+  content: string | null;
+  plantedOrder: number | null;
+  expectedOrder: number | null;
+  status: 'OPEN' | 'RESOLVED' | 'ABANDONED';
+  resolvedOrder: number | null;
+  updatedAt: string | null;
+}
+
+/** 半自动伏笔记账：AI 提炼到的新埋伏笔（未落库，作者确认后写入） */
+export interface ForeshadowNewSuggest {
+  title: string;
+  content: string | null;
+  plantedOrder: number | null;
+}
+
+/** 半自动伏笔记账：AI 判定本章已回收的账本既有伏笔 */
+export interface ForeshadowResolvedSuggest {
+  id: number;
+  title: string;
+  resolvedOrder: number | null;
+}
+
+/** 正文生成完成后的伏笔记账建议（均为建议，作者勾选确认后才应用） */
+export interface ForeshadowSuggest {
+  newItems: ForeshadowNewSuggest[];
+  resolved: ForeshadowResolvedSuggest[];
+}
+
 export interface ChapterVersion {
   id: number;
   versionNo: number;

@@ -68,6 +68,7 @@ public class OutlineTaskService {
         memoryService.outlines(novelId, user);
         List<Long> ids = req == null ? null : req.outlineIds();
         Integer chapters = req == null ? null : req.chapters();
+        String authorNote = req == null ? null : req.authorNote();
         boolean batch = ids == null || ids.isEmpty();
         // 先查进行中任务再补建规划行，避免任务已在进行时产生副作用
         if (taskRepository.existsByNovelIdAndStatusIn(novelId, ACTIVE)) {
@@ -91,12 +92,13 @@ public class OutlineTaskService {
         taskRepository.save(task);
 
         Long taskId = task.getId();
-        executor.submit(() -> run(taskId, user));
+        // 作者有话说随任务闭包传入后台线程（对整批每章生效）
+        executor.submit(() -> run(taskId, user, authorNote));
         return toVO(task);
     }
 
     /** 后台执行：逐条生成大纲内容并推进进度；单条失败只计数、不中断整批 */
-    private void run(Long taskId, User actor) {
+    private void run(Long taskId, User actor, String authorNote) {
         try {
             OutlineTask task = load(taskId);
             task.setStatus(OutlineTask.Status.RUNNING);
@@ -119,7 +121,7 @@ public class OutlineTaskService {
                 current.setCurrentTitle(o.getTitle());
                 taskRepository.save(current);
                 try {
-                    aiService.generateChapterOutline(task.getNovelId(), o.getId(), actor)
+                    aiService.generateChapterOutline(task.getNovelId(), o.getId(), actor, null, authorNote)
                             .blockLast(COLLECT_TIMEOUT);
                     current.setSucceeded(current.getSucceeded() + 1);
                 } catch (Exception e) {

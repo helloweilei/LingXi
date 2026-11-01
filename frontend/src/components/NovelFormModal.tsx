@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react';
-import { Button, Form, Input, InputNumber, Modal, Select } from 'antd';
+import { useEffect, useRef, useState } from 'react';
+import { Button, Form, Input, InputNumber, Modal, Select, Space, message } from 'antd';
+import { ThunderboltOutlined } from '@ant-design/icons';
 import { novelApi } from '../api';
+import { streamSse } from '../api/ai';
 import type { Novel } from '../api/types';
 
 export const GENRES = [
@@ -55,11 +57,16 @@ interface Props {
   editing: Novel | null;
   onClose: () => void;
   onSaved: (novel: Novel) => void;
+  /** 全书大纲：有内容时简介栏提供「根据大纲一键生成」（编辑场景由详情页传入） */
+  outline?: string | null;
 }
 
-export default function NovelFormModal({ open, editing, onClose, onSaved }: Props) {
+export default function NovelFormModal({ open, editing, onClose, onSaved, outline }: Props) {
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
+  /** 正在根据大纲流式生成简介 */
+  const [genDesc, setGenDesc] = useState(false);
+  const genAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -70,6 +77,13 @@ export default function NovelFormModal({ open, editing, onClose, onSaved }: Prop
       );
     }
   }, [open, editing, form]);
+
+  // 弹窗关闭/卸载时中断未完成的简介生成，避免回写已销毁的表单
+  useEffect(() => {
+    if (!open) {
+      genAbortRef.current?.abort();
+    }
+  }, [open]);
 
   const onFinish = async (values: any) => {
     setSaving(true);
@@ -88,6 +102,50 @@ export default function NovelFormModal({ open, editing, onClose, onSaved }: Prop
       Modal.error({ title: '保存失败', content: e?.message ?? '' });
     } finally {
       setSaving(false);
+    }
+  };
+
+  /** 依据全书大纲一键生成简介：流式逐字填充简介框，可直接改后再保存 */
+  const genDescription = () => {
+    if (!editing || genDesc) return;
+    const current = form.getFieldValue('description') as string | undefined;
+    const run = () => {
+      setGenDesc(true);
+      const ctrl = new AbortController();
+      genAbortRef.current = ctrl;
+      let acc = '';
+      streamSse(
+        `/api/ai/novels/${editing.id}/description`,
+        null,
+        {
+          onDelta: (d) => {
+            acc += d;
+            form.setFieldValue('description', acc);
+          },
+        },
+        ctrl.signal,
+      )
+        .then(() => message.success('简介已生成，可继续编辑后保存'))
+        .catch((e: any) => {
+          if (e?.name !== 'AbortError') {
+            message.error(e?.message ?? '生成失败，请稍后重试');
+          }
+        })
+        .finally(() => {
+          setGenDesc(false);
+          genAbortRef.current = null;
+        });
+    };
+    if (current?.trim()) {
+      Modal.confirm({
+        title: '根据大纲重新生成简介？',
+        content: '当前简介会被新生成的内容覆盖。',
+        okText: '生成',
+        cancelText: '取消',
+        onOk: run,
+      });
+    } else {
+      run();
     }
   };
 
@@ -147,7 +205,26 @@ export default function NovelFormModal({ open, editing, onClose, onSaved }: Prop
             tokenSeparators={['、']}
           />
         </Form.Item>
-        <Form.Item name="description" label="简介" rules={[{ max: 1000, message: '简介最长 1000 字' }]}>
+        <Form.Item
+          name="description"
+          label={
+            <Space size={8}>
+              <span>简介</span>
+              {editing && outline?.trim() && (
+                <Button
+                  size="small"
+                  type="link"
+                  icon={<ThunderboltOutlined />}
+                  loading={genDesc}
+                  onClick={genDescription}
+                >
+                  {genDesc ? '生成中…' : '根据大纲一键生成'}
+                </Button>
+              )}
+            </Space>
+          }
+          rules={[{ max: 1000, message: '简介最长 1000 字' }]}
+        >
           <Input.TextArea
             rows={4}
             maxLength={1000}

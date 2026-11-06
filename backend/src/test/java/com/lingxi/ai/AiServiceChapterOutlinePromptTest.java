@@ -156,6 +156,47 @@ class AiServiceChapterOutlinePromptTest {
     }
 
     @Test
+    void promptCarriesProgressInfoWhenTotalKnown() {
+        Novel novel = novelWithOutline("第一卷：崛起。");
+        // 第 20 章 / 共 25 章：prompt 必须带总章数与剩余章数，让 AI 知道离完结还有多远
+        String prompt = aiService.buildChapterOutlinePrompt("", novel, outline(20), false, null, null, null, 25);
+        assertTrue(prompt.contains("全书共 25 章"));
+        assertTrue(prompt.contains("还剩 5 章"));
+        // 剩余 5 章：给「开始铺垫收线」的轻提示，但还不是强收线
+        assertTrue(prompt.contains("进度提示"));
+        assertFalse(prompt.contains("收线阶段"));
+        // 第 23 章 / 共 25 章：剩余 2 章，必须是强收线指令
+        String nearEnd = aiService.buildChapterOutlinePrompt("", novel, outline(23), false, null, null, null, 25);
+        assertTrue(nearEnd.contains("还剩 2 章"));
+        assertTrue(nearEnd.contains("收线阶段"));
+        assertTrue(nearEnd.contains("不再开启新的支线"));
+        // 非终章不带完结块
+        assertFalse(nearEnd.contains("完结规划（最高优先级）"));
+    }
+
+    @Test
+    void finalChapterPromptWithTotalStillUsesEndingPlanning() {
+        Novel novel = novelWithOutline("第一卷：崛起。\n结局：尘埃落定。");
+        // 第 25 章 / 共 25 章：终章判定 + 完结规划优先，不再叠加收线块（避免指令重复）
+        String prompt = aiService.buildChapterOutlinePrompt("", novel, outline(25), true, null, null, null, 25);
+        assertTrue(prompt.contains("全书共 25 章"));
+        assertTrue(prompt.contains("完结规划"));
+        assertFalse(prompt.contains("收线阶段"));
+    }
+
+    @Test
+    void promptWithoutTotalKeepsLegacyBehavior() {
+        Novel novel = novelWithOutline("第一卷：崛起。");
+        // 未传总数：保持旧行为——仅终章标注，无进度信息
+        String mid = aiService.buildChapterOutlinePrompt("", novel, outline(5), false, null, null, null, null);
+        assertFalse(mid.contains("全书共"));
+        assertFalse(mid.contains("还剩"));
+        assertFalse(mid.contains("收线阶段"));
+        String last = aiService.buildChapterOutlinePrompt("", novel, outline(10), true, null, null, null, null);
+        assertTrue(last.contains("（全书最后一章）"));
+    }
+
+    @Test
     void previousOutlineTextPicksClosestLowerOrderAndSkipsBlank() {
         // 序号允许缺口：实际“上一行”由仓库派生查询按最大更小序号取回，这里只验证委派与兜底
         ChapterOutline row = new ChapterOutline();

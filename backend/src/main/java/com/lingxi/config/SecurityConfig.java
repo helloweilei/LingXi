@@ -25,8 +25,9 @@ import java.util.List;
 public class SecurityConfig {
 
     @Bean
+    @SuppressWarnings("null")
     public SecurityFilterChain securityFilterChain(HttpSecurity http, JwtAuthFilter jwtAuthFilter,
-                                                   ObjectMapper objectMapper) throws Exception {
+            ObjectMapper objectMapper) throws Exception {
         http.csrf(AbstractHttpConfigurer::disable)
                 .cors(c -> c.configurationSource(corsConfigurationSource()))
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))

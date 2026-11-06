@@ -483,8 +483,11 @@ public class AiService {
         prompt.append("\n\n【本章】第").append(chapter.getChapterOrder())
                 .append("章 ").append(chapter.getTitle());
         if (total > 0) {
-            prompt.append("（全书共 ").append(total).append(" 章");
+            int remaining = (int) Math.max(0, total - chapter.getChapterOrder());
+            prompt.append("（全书共 ").append(total).append(" 章，本章之后还剩 ").append(remaining).append(" 章");
             prompt.append(isFinalChapter ? "，且是全书最后一章）" : "）");
+            // 临近结局的收线节奏（终章另有完结规划块，这里只管非终章）
+            appendPacingDirective(prompt, chapter.getChapterOrder(), isFinalChapter, (int) total);
         }
         prompt.append("\n");
         if (currentTail.isEmpty()) {
@@ -908,7 +911,7 @@ public class AiService {
         // 大纲生成改用完整静态上下文（角色名册/世界观/未回收伏笔/故事脑/最近章节大纲）：
         // 大纲是决定「是否回收长程伏笔」的环节，必须与正文生成享有同等记忆视野
         String prompt = buildChapterOutlinePrompt(baseContext(novel), novel, outline, isFinalChapter,
-                existingContent, previousOutlineText(novel.getId(), outline.getChapterOrder()), authorNote);
+                existingContent, previousOutlineText(novel.getId(), outline.getChapterOrder()), authorNote, total);
         StringBuilder acc = new StringBuilder();
         return llm(user).stream(AiTaskType.CHAPTER_OUTLINE, contextOf(novel, existingContent),
                 SYSTEM_PROMPT, prompt)
@@ -943,7 +946,7 @@ public class AiService {
                     .append(tail(novel.getOutline(), BOOK_OUTLINE_TAIL_CHARS)).append("\n");
         }
         return buildChapterOutlinePrompt(head.toString(), novel, outline, isFinalChapter, existingContent,
-                prevOutlineText, authorNote);
+                prevOutlineText, authorNote, null);
     }
 
     /**
@@ -953,7 +956,7 @@ public class AiService {
      * 此时全书大纲已包含在 head 内（受预算截断保护），不再重复注入。
      */
     String buildChapterOutlinePrompt(String head, Novel novel, ChapterOutline outline, boolean isFinalChapter,
-            String existingContent, String prevOutlineText, String authorNote) {
+            String existingContent, String prevOutlineText, String authorNote, Integer totalChapters) {
         StringBuilder prompt = new StringBuilder(head);
         // 上一章大纲：连续叙事的直接上文，本章必须承接（第一章无上一章，自然缺省）
         if (!isBlank(prevOutlineText)) {
@@ -961,13 +964,18 @@ public class AiService {
                     .append(tail(prevOutlineText, PREV_OUTLINE_TAIL_CHARS)).append("\n");
         }
         prompt.append("\n【当前要规划的章节】第").append(outline.getChapterOrder()).append("章");
-        if (isFinalChapter) {
+        if (totalChapters != null && totalChapters > 0) {
+            int remaining = Math.max(0, totalChapters - outline.getChapterOrder());
+            prompt.append("（全书共 ").append(totalChapters).append(" 章，本章之后还剩 ").append(remaining).append(" 章）");
+        } else if (isFinalChapter) {
             prompt.append("（全书最后一章）");
         }
         if (!isBlank(outline.getTitle())) {
             prompt.append("（已拟定章节名：").append(outline.getTitle()).append("）");
         }
         prompt.append("\n");
+        // 进度节奏：临近结局时让 AI 主动收线，而不是闷头按常规节奏展开新冲突
+        appendPacingDirective(prompt, outline.getChapterOrder(), isFinalChapter, totalChapters);
         if (!isBlank(outline.getOutline())) {
             prompt.append("（已有大纲草稿，可据此补全细化）\n【已有草稿】\n")
                     .append(tail(outline.getOutline(), 2000)).append("\n");
@@ -1036,6 +1044,38 @@ public class AiService {
     static boolean isFinalPlannedChapter(ChapterOutline outline, int totalChapters) {
         return outline != null && outline.getChapterOrder() != null
                 && totalChapters > 0 && outline.getChapterOrder() >= totalChapters;
+    }
+
+    /**
+     * 进度节奏指令：让 AI 知道「还剩几章」并据此校准节奏——临近结局时收线，
+     * 而不是按常规节奏继续开新冲突。终章的完结规划另有更高优先级指令块，这里只管非终章。
+     * 剩余 ≤2 章：强收线（禁开新支线、合并伏笔、铺垫终局）；剩余 ≤5 章：提示开始铺垫。
+     * 大纲与正文两条生成链路共用。
+     */
+    static void appendPacingDirective(StringBuilder prompt, Integer currentOrder, boolean isFinalChapter,
+            Integer totalChapters) {
+        if (isFinalChapter || totalChapters == null || totalChapters <= 0 || currentOrder == null) {
+            return;
+        }
+        int remaining = totalChapters - currentOrder;
+        if (remaining <= 0) {
+            return;
+        }
+        if (remaining <= 2) {
+            prompt.append("""
+
+                    【进度感知：临近终局（收线阶段，最高优先级之一）】
+                    本章之后全书只剩 %d 章就要完结，本章必须进入「收线」阶段：
+                    1. 不再开启新的支线、新人物线或新的大冲突；
+                    2. 对照上方【未回收伏笔清单】开始回收伏笔——本章至少推进或回收其中最关键的一条；
+                    3. 情节推进明确指向全书大纲的结局走向，为最后一章的高潮与收束做好全部铺垫。
+                    """.formatted(remaining));
+        } else if (remaining <= 5) {
+            prompt.append("""
+
+                    （进度提示：本章之后全书还剩 %d 章，可开始铺垫收线——暂缓开启难以在剩余章数内闭合的新支线。）
+                    """.formatted(remaining));
+        }
     }
 
     /**

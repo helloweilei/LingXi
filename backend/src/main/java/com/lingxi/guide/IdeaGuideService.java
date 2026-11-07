@@ -24,7 +24,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -80,9 +79,9 @@ public class IdeaGuideService {
     private final ObjectMapper objectMapper;
 
     public IdeaGuideService(CreativeIntentRepository repository, LlmClientProvider llmClientProvider,
-                            NovelService novelService, NovelRepository novelRepository,
-                            CharacterService characterService,
-                            WorldSettingService worldSettingService, ObjectMapper objectMapper) {
+            NovelService novelService, NovelRepository novelRepository,
+            CharacterService characterService,
+            WorldSettingService worldSettingService, ObjectMapper objectMapper) {
         this.repository = repository;
         this.llmClientProvider = llmClientProvider;
         this.novelService = novelService;
@@ -92,6 +91,7 @@ public class IdeaGuideService {
         this.objectMapper = objectMapper;
     }
 
+    @SuppressWarnings("null")
     public GuideDtos.GuideStartVO start(User user, String seed) {
         CreativeIntent intent = new CreativeIntent();
         intent.setUserId(user.getId());
@@ -139,11 +139,13 @@ public class IdeaGuideService {
         List<CreativeIntent> intents = repository.findByUserIdOrderByIdDesc(user.getId(), PageRequest.of(0, size));
 
         // 批量加载关联作品，避免逐条查询（N+1）
+        @SuppressWarnings("null")
         List<Long> novelIds = intents.stream()
                 .map(CreativeIntent::getNovelId)
                 .filter(java.util.Objects::nonNull)
                 .distinct()
                 .toList();
+        @SuppressWarnings("null")
         Map<Long, Novel> novelById = novelIds.isEmpty()
                 ? Map.of()
                 : novelRepository.findAllById(novelIds).stream()
@@ -271,7 +273,9 @@ public class IdeaGuideService {
     @Transactional
     public void delete(User user, Long id) {
         CreativeIntent intent = loadOwned(id, user);
-        repository.delete(intent);
+        if (intent != null) {
+            repository.delete(intent);
+        }
     }
 
     private CreativeIntent loadOwned(Long id, User user) {
@@ -474,14 +478,16 @@ public class IdeaGuideService {
     private String buildGuidedPrompt(Map<String, String> answers) {
         StringBuilder sb = new StringBuilder();
         sb.append("以下是用户填写的创作偏好，请基于它们策划 3 套差异化、可落地的原创小说方案：\n");
-        answers.forEach((k, v) -> sb.append("- ").append(FIELD_LABEL.getOrDefault(k, k)).append("：").append(v).append("\n"));
-        sb.append("""
-                【要求】
-                1. 输出一个 JSON 数组，包含 3 个对象；
-                2. 每个对象字段：title（书名）、premise（一句话梗概/卖点）、world（世界观要点）、protagonist（主角设定）、outline（分卷大纲草案，用 \\n 换行）、characters（数组，每项 {name,role,description}）、worlds（数组，每项 {title,content}）、platform（目标平台，来自用户输入）；
-                3. 三套方案在题材切入点、人设、爽点上要有明显差异；
-                4. 只输出 JSON，不要任何额外文字或代码块标记。
-                """);
+        answers.forEach(
+                (k, v) -> sb.append("- ").append(FIELD_LABEL.getOrDefault(k, k)).append("：").append(v).append("\n"));
+        sb.append(
+                """
+                        【要求】
+                        1. 输出一个 JSON 数组，包含 3 个对象；
+                        2. 每个对象字段：title（书名）、premise（一句话梗概/卖点）、world（世界观要点）、protagonist（主角设定）、outline（分卷大纲草案，用 \\n 换行）、characters（数组，每项 {name,role,description}）、worlds（数组，每项 {title,content}）、platform（目标平台，来自用户输入）；
+                        3. 三套方案在题材切入点、人设、爽点上要有明显差异；
+                        4. 只输出 JSON，不要任何额外文字或代码块标记。
+                        """);
         return sb.toString();
     }
 
@@ -494,6 +500,7 @@ public class IdeaGuideService {
                 2. 每个对象字段：title（书名）、premise（一句话梗概/卖点）、world（世界观要点）、protagonist（主角设定）、outline（分卷大纲草案，用 \\n 换行）、characters（数组，每项 {name,role,description}）、worlds（数组，每项 {title,content}）、platform（推断合适的发布平台）；
                 3. 三套方案可以围绕同一个核心种子做不同方向的发散（如不同题材、不同基调、不同受众）；
                 4. 只输出 JSON，不要任何额外文字或代码块标记。
-                """.formatted(seed.replace("%", "%%"));
+                """
+                .formatted(seed.replace("%", "%%"));
     }
 }

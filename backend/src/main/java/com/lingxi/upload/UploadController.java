@@ -30,6 +30,7 @@ public class UploadController {
 
     private final Path uploadDir = Paths.get("uploads").toAbsolutePath().normalize();
 
+    @SuppressWarnings("null")
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ApiResponse<Map<String, String>> upload(@RequestParam("file") MultipartFile file) {
         if (file == null || file.isEmpty()) {

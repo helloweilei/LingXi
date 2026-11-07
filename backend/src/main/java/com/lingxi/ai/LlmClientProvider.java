@@ -20,7 +20,7 @@ public class LlmClientProvider {
     private final LlmClient globalClient;
 
     public LlmClientProvider(AiConfigRepository aiConfigRepository, AiProperties aiProperties,
-                             ObjectMapper objectMapper, LlmClient globalClient) {
+            ObjectMapper objectMapper, LlmClient globalClient) {
         this.aiConfigRepository = aiConfigRepository;
         this.aiProperties = aiProperties;
         this.objectMapper = objectMapper;
@@ -46,6 +46,7 @@ public class LlmClientProvider {
     }
 
     /** 当前用户生效的模型名（status 接口展示用） */
+    @SuppressWarnings("null")
     public String effectiveModel(User user) {
         return aiConfigRepository.findByUserId(user.getId())
                 .filter(c -> "openai".equals(c.getProvider()) && !c.getApiKey().isBlank())

@@ -42,9 +42,10 @@ public class OpenAiCompatClient implements LlmClient {
     /**
      * 显式参数构造：供用户级配置按需实例化（每个用户可持有独立的 baseUrl/apiKey/model）。
      */
+    @SuppressWarnings("null")
     public OpenAiCompatClient(String baseUrl, String apiKey, String model, double temperature,
-                              int readTimeoutSeconds, int connectTimeoutSeconds,
-                              int maxOutputTokens, ObjectMapper objectMapper) {
+            int readTimeoutSeconds, int connectTimeoutSeconds,
+            int maxOutputTokens, ObjectMapper objectMapper) {
         HttpClient httpClient = HttpClient.create()
                 .responseTimeout(Duration.ofSeconds(readTimeoutSeconds))
                 .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, connectTimeoutSeconds * 1000);

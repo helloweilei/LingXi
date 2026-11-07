@@ -39,11 +39,11 @@ public class NovelService {
     private final ForeshadowingRepository foreshadowingRepository;
 
     public NovelService(NovelRepository novelRepository, ChapterRepository chapterRepository,
-                        ChapterVersionRepository chapterVersionRepository,
-                        CharacterRepository characterRepository, CharacterRelationRepository characterRelationRepository,
-                        WorldSettingRepository worldSettingRepository,
-                        ChapterOutlineRepository chapterOutlineRepository, StoryMemoryRepository storyMemoryRepository,
-                        ForeshadowingRepository foreshadowingRepository) {
+            ChapterVersionRepository chapterVersionRepository,
+            CharacterRepository characterRepository, CharacterRelationRepository characterRelationRepository,
+            WorldSettingRepository worldSettingRepository,
+            ChapterOutlineRepository chapterOutlineRepository, StoryMemoryRepository storyMemoryRepository,
+            ForeshadowingRepository foreshadowingRepository) {
         this.novelRepository = novelRepository;
         this.chapterRepository = chapterRepository;
         this.chapterVersionRepository = chapterVersionRepository;
@@ -120,6 +120,7 @@ public class NovelService {
         return toDetailVO(novel, chapterRepository.countByNovelIdAndDeletedFalse(novelId));
     }
 
+    @SuppressWarnings("null")
     @Transactional
     public void delete(Long novelId, User user) {
         Novel novel = loadOwned(novelId, user);
@@ -143,6 +144,7 @@ public class NovelService {
                 .orElseThrow(() -> new BizException(404, "作品不存在", 404));
     }
 
+    @SuppressWarnings("null")
     private Map<Long, Long> chapterCounts(List<Novel> novels) {
         Map<Long, Long> counts = new HashMap<>();
         if (novels.isEmpty()) {

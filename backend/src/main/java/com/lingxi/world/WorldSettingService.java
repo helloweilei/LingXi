@@ -49,11 +49,13 @@ public class WorldSettingService {
         return toVO(w);
     }
 
+    @SuppressWarnings("null")
     @Transactional
     public void delete(Long id, User user) {
         worldSettingRepository.delete(loadOwned(id, user));
     }
 
+    @SuppressWarnings("null")
     private WorldSetting loadOwned(Long id, User user) {
         WorldSetting w = worldSettingRepository.findById(id)
                 .orElseThrow(() -> new BizException(404, "设定条目不存在", 404));

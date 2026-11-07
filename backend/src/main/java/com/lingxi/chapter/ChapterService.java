@@ -25,7 +25,7 @@ public class ChapterService {
     private final NovelService novelService;
 
     public ChapterService(ChapterRepository chapterRepository, ChapterVersionRepository versionRepository,
-                          NovelService novelService) {
+            NovelService novelService) {
         this.chapterRepository = chapterRepository;
         this.versionRepository = versionRepository;
         this.novelService = novelService;
@@ -54,6 +54,7 @@ public class ChapterService {
         chapter.setNovelId(novel.getId());
         chapter.setTitle(defaultTitle(req.title()));
         chapter.setContent(req.content() == null ? "" : req.content());
+        @SuppressWarnings("null")
         int maxOrder = chapterRepository.findTopByNovelIdAndDeletedFalseOrderByChapterOrderDesc(novel.getId())
                 .map(Chapter::getChapterOrder).orElse(0);
         chapter.setChapterOrder(maxOrder + 1);
@@ -162,6 +163,7 @@ public class ChapterService {
     @Transactional
     public void deleteVersion(Long chapterId, Long versionId, User user) {
         Chapter chapter = loadOwned(chapterId, user);
+        @SuppressWarnings("null")
         ChapterVersion version = versionRepository.findById(versionId)
                 .orElseThrow(() -> new BizException(404, "版本快照不存在", 404));
         if (!version.getChapterId().equals(chapter.getId())) {
@@ -175,6 +177,7 @@ public class ChapterService {
     public VO restoreVersion(Long chapterId, Long versionId, User user) {
         Chapter chapter = loadOwned(chapterId, user);
         Novel novel = novelService.loadOwned(chapter.getNovelId(), user);
+        @SuppressWarnings("null")
         ChapterVersion version = versionRepository.findById(versionId)
                 .filter(v -> v.getChapterId().equals(chapter.getId()))
                 .orElseThrow(() -> new BizException(404, "版本不存在", 404));
@@ -191,6 +194,7 @@ public class ChapterService {
 
     /** 校验属主后返回实体（含已删除章节，供恢复/版本浏览使用） */
     public Chapter loadOwned(Long chapterId, User user) {
+        @SuppressWarnings("null")
         Chapter chapter = chapterRepository.findById(chapterId)
                 .orElseThrow(() -> new BizException(404, "章节不存在", 404));
         novelService.loadOwned(chapter.getNovelId(), user);
@@ -217,6 +221,7 @@ public class ChapterService {
     }
 
     /** 每章最多保留 MAX_VERSIONS_PER_CHAPTER 个快照，超出删除最旧的 */
+    @SuppressWarnings("null")
     private void prune(Long chapterId) {
         long count = versionRepository.countByChapterId(chapterId);
         if (count <= MAX_VERSIONS_PER_CHAPTER) {

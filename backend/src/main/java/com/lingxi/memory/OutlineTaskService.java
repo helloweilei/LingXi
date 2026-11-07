@@ -60,7 +60,7 @@ public class OutlineTaskService {
      * - outlineIds 留空：生成所有「大纲内容为空」的规划行；
      * - chapters 留空：仅处理已有规划行；
      * - chapters 有值且全书还没有规划行：先按数量补建空规划行（立即提交），
-     *   实现「一键从零规划全书」——用户不必先手动新增规划。
+     * 实现「一键从零规划全书」——用户不必先手动新增规划。
      */
     @Transactional
     public TaskVO start(Long novelId, User user, StartReq req) {
@@ -184,6 +184,7 @@ public class OutlineTaskService {
         taskRepository.delete(task);
     }
 
+    @SuppressWarnings("null")
     private OutlineTask load(Long taskId) {
         return taskRepository.findById(taskId)
                 .orElseThrow(() -> new BizException(404, "任务不存在", 404));
@@ -211,6 +212,7 @@ public class OutlineTaskService {
         return sb.toString();
     }
 
+    @SuppressWarnings("null")
     static List<Long> parseIds(String csv) {
         if (csv == null || csv.isBlank()) {
             return List.of();

@@ -31,7 +31,8 @@ import java.util.concurrent.Executors;
  * 1. （可选）先生成全书大纲并写入作品；
  * 2. 逐章：建空章节 →（可选）先生成章节大纲（写作前规划）→ AI 按大纲生成整章正文 → 落库（reason=ai 快照）；
  * 3. AUTO 模式一气呵成；CONFIRM 模式每章后进入 WAITING_APPROVAL，等用户批准再继续。
- * 状态机：QUEUED → RUNNING →（CONFIRM）WAITING_APPROVAL → … → DONE / FAILED / CANCELLED
+ * 状态机：QUEUED → RUNNING →（CONFIRM）WAITING_APPROVAL → … → DONE / FAILED /
+ * CANCELLED
  */
 @Service
 public class AutoWriteService {
@@ -56,8 +57,8 @@ public class AutoWriteService {
     });
 
     public AutoWriteService(WritingTaskRepository taskRepository, NovelService novelService,
-                            ChapterService chapterService, AiService aiService,
-                            ChapterOutlineRepository chapterOutlineRepository, ObjectMapper objectMapper) {
+            ChapterService chapterService, AiService aiService,
+            ChapterOutlineRepository chapterOutlineRepository, ObjectMapper objectMapper) {
         this.taskRepository = taskRepository;
         this.novelService = novelService;
         this.chapterService = chapterService;
@@ -71,8 +72,10 @@ public class AutoWriteService {
         executor.shutdownNow();
     }
 
-    /** 发起自动创作任务（校验意图参数；每本书同时只允许一个进行中任务）。
-     * 支持 startChapter：从第 N 章续跑（跳过前面已生成的章节，用于失败任务断点续写）。 */
+    /**
+     * 发起自动创作任务（校验意图参数；每本书同时只允许一个进行中任务）。
+     * 支持 startChapter：从第 N 章续跑（跳过前面已生成的章节，用于失败任务断点续写）。
+     */
     public TaskVO start(Long novelId, User user, AutoWriteReq req) {
         novelService.loadOwned(novelId, user);
         int chapters = req.chapters() == null ? 5 : req.chapters();
@@ -169,8 +172,10 @@ public class AutoWriteService {
 
     /* ---------------- 执行器 ---------------- */
 
+    @SuppressWarnings("null")
     private void run(Long taskId, User user) {
         try {
+            @SuppressWarnings("null")
             WritingTask task = taskRepository.findById(taskId).orElseThrow();
             if (task.getStatus() == WritingTaskStatus.CANCELLED) {
                 return;
@@ -249,7 +254,8 @@ public class AutoWriteService {
                 }
             }
             task.setStatus(task.getCurrentChapter() >= task.getTotalChapters()
-                    ? WritingTaskStatus.DONE : WritingTaskStatus.CANCELLED);
+                    ? WritingTaskStatus.DONE
+                    : WritingTaskStatus.CANCELLED);
             saveTask(task);
         } catch (Exception e) {
             log.error("Auto write task {} failed: {}", taskId, e.toString());
@@ -269,6 +275,7 @@ public class AutoWriteService {
      * - 用户已取消（CANCELLED）或任务已失败（FAILED）时，保持数据库状态，不回写；
      * - 任务行已被删除时，不再保存（避免把已删除的任务“复活”）。
      */
+    @SuppressWarnings("null")
     private void saveTask(WritingTask task) {
         taskRepository.findById(task.getId()).ifPresent(cur -> {
             task.setStatus(mergeSavedStatus(task.getStatus(), cur.getStatus()));
@@ -287,6 +294,7 @@ public class AutoWriteService {
     }
 
     /** 每次迭代前重读状态：支持用户取消（CANCELLED 立即停） */
+    @SuppressWarnings("null")
     private boolean isActive(Long taskId) {
         return taskRepository.findById(taskId)
                 .map(t -> t.getStatus() == WritingTaskStatus.RUNNING || t.getStatus() == WritingTaskStatus.QUEUED)
@@ -297,6 +305,7 @@ public class AutoWriteService {
      * 确保第 chapterOrder 章存在一条**规划行**（大纲），不存在则创建一条空规划。
      * 大纲先于章节存在：这里是流水线里唯一产生规划的入口，章节随后由规划落地。
      */
+    @SuppressWarnings("null")
     private Long ensureOutlineRow(Long novelId, int chapterOrder) {
         return chapterOutlineRepository.findByNovelIdAndChapterOrder(novelId, chapterOrder)
                 .map(ChapterOutline::getId)
@@ -314,6 +323,7 @@ public class AutoWriteService {
      * 取该规划已落地出的章节 id（用于记录任务产物、便于删除任务时清理）。
      * 校验 novelId 归属，防止跨书取到他人规划。
      */
+    @SuppressWarnings("null")
     private Long resolveChapterIdByOutline(Long novelId, Long outlineId) {
         return chapterOutlineRepository.findById(outlineId)
                 .filter(o -> o.getNovelId().equals(novelId))
@@ -322,6 +332,7 @@ public class AutoWriteService {
     }
 
     /** 任务进度展示用标题：优先用规划上的章节名 */
+    @SuppressWarnings("null")
     private String resolveChapterTitle(Long novelId, int chapterOrder) {
         return chapterOutlineRepository.findByNovelIdAndChapterOrder(novelId, chapterOrder)
                 .map(ChapterOutline::getTitle)
@@ -340,6 +351,7 @@ public class AutoWriteService {
     }
 
     /** 解析逗号分隔的章节 id 列表 */
+    @SuppressWarnings("null")
     static List<Long> parseIds(String csv) {
         if (csv == null || csv.isBlank()) {
             return List.of();
@@ -351,6 +363,7 @@ public class AutoWriteService {
                 .toList();
     }
 
+    @SuppressWarnings("null")
     private WritingTask loadOwned(Long taskId, User user) {
         return taskRepository.findById(taskId)
                 .filter(t -> t.getUserId().equals(user.getId()))

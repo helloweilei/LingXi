@@ -30,8 +30,8 @@ public class MemoryService {
     private final AiService aiService;
 
     public MemoryService(NovelService novelService, ChapterOutlineRepository chapterOutlineRepository,
-                         StoryMemoryRepository storyMemoryRepository, ChapterRepository chapterRepository,
-                         AiService aiService) {
+            StoryMemoryRepository storyMemoryRepository, ChapterRepository chapterRepository,
+            AiService aiService) {
         this.novelService = novelService;
         this.chapterOutlineRepository = chapterOutlineRepository;
         this.storyMemoryRepository = storyMemoryRepository;
@@ -75,6 +75,7 @@ public class MemoryService {
         Novel novel = novelService.loadOwned(novelId, user);
         List<ChapterOutline> outs = chapterOutlineRepository.findByNovelIdOrderByChapterOrderAsc(novelId);
         // 已落地章节按 id 取（用于展示是否已写正文）
+        @SuppressWarnings("null")
         Map<Long, Chapter> chapters = outs.stream()
                 .map(ChapterOutline::getChapterId)
                 .filter(java.util.Objects::nonNull)
@@ -86,14 +87,17 @@ public class MemoryService {
         long plannedCount = outs.size();
         Integer totalTarget = novel.getTargetWords();
         Long defaultPerChapter = (plannedCount > 0 && totalTarget != null && totalTarget > 0)
-                ? (long) Math.ceil((double) totalTarget / plannedCount) : null;
+                ? (long) Math.ceil((double) totalTarget / plannedCount)
+                : null;
         return outs.stream().map(o -> {
             Chapter c = o.getChapterId() == null ? null : chapters.get(o.getChapterId());
             boolean written = c != null && c.getWordCount() != null && c.getWordCount() > 0;
             boolean customized = o.getTargetWords() != null && o.getTargetWords() > 0;
+            @SuppressWarnings("null")
             Long words = customized ? o.getTargetWords().longValue() : defaultPerChapter;
             String title = (o.getTitle() == null || o.getTitle().isBlank())
-                    ? (c == null ? null : c.getTitle()) : o.getTitle();
+                    ? (c == null ? null : c.getTitle())
+                    : o.getTitle();
             return new OutlineItemVO(o.getId(), o.getChapterOrder(), title,
                     o.getChapterId(), words, customized, written,
                     o.getOutline() != null && !o.getOutline().isBlank(), o.getOutline(), o.getUpdatedAt());
@@ -106,7 +110,7 @@ public class MemoryService {
      */
     @Transactional
     public List<OutlineItemVO> createOutline(Long novelId, User user, String chapterTitle,
-                                              String outline, Integer targetWords) {
+            String outline, Integer targetWords) {
         novelService.loadOwned(novelId, user);
         ChapterOutline o = new ChapterOutline();
         o.setNovelId(novelId);
@@ -125,9 +129,10 @@ public class MemoryService {
      * 编辑一条规划（章节名 / 大纲内容 / 目标字数）。
      * 大纲与标题传 null 表示"不改动该字段"；targetWords 传 null 同样保持原值。
      */
+    @SuppressWarnings("null")
     @Transactional
     public void saveOutline(Long novelId, User user, Long outlineId, String chapterTitle,
-                            String outline, Integer targetWords) {
+            String outline, Integer targetWords) {
         ChapterOutline o = loadOwned(novelId, outlineId);
         if (chapterTitle != null) {
             o.setTitle(cleanTitle(chapterTitle));
@@ -150,6 +155,7 @@ public class MemoryService {
     }
 
     /** 删除一条规划（若该章已落地章节，一并删除其空章节，保留已有正文的章节） */
+    @SuppressWarnings("null")
     @Transactional
     public void deleteOutline(Long novelId, User user, Long outlineId) {
         ChapterOutline o = loadOwned(novelId, outlineId);
@@ -170,6 +176,7 @@ public class MemoryService {
         if (existing.size() >= chapters) {
             return 0;
         }
+        @SuppressWarnings("null")
         Set<Integer> orders = existing.stream()
                 .map(ChapterOutline::getChapterOrder)
                 .collect(Collectors.toSet());
@@ -250,6 +257,7 @@ public class MemoryService {
                 .orElse(1);
     }
 
+    @SuppressWarnings("null")
     private ChapterOutline loadOwned(Long novelId, Long outlineId) {
         return chapterOutlineRepository.findById(outlineId)
                 .filter(o -> o.getNovelId().equals(novelId))

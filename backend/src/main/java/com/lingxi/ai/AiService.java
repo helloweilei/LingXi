@@ -318,7 +318,8 @@ public class AiService {
             throw new BizException(400, "请先在「全书大纲」里填写大纲，再生成简介", 400);
         }
         StringBuilder prompt = new StringBuilder("【作品信息】\n书名：").append(novel.getTitle())
-                .append("\n类型：").append(novel.getGenre() == null || novel.getGenre().isBlank() ? "未设置" : novel.getGenre());
+                .append("\n类型：")
+                .append(novel.getGenre() == null || novel.getGenre().isBlank() ? "未设置" : novel.getGenre());
         if (novel.getLanguageStyle() != null && !novel.getLanguageStyle().isBlank()) {
             prompt.append("\n语言风格：").append(novel.getLanguageStyle());
         }
@@ -340,6 +341,7 @@ public class AiService {
     }
 
     /** 删除一条视频提示词（属主校验：不属于该作品的按 404 处理，避免暴露存在性） */
+    @SuppressWarnings("null")
     public void deleteVideoPrompt(Long novelId, Long videoPromptId, User user) {
         novelService.loadOwned(novelId, user);
         VideoPrompt vp = videoPromptRepository.findById(videoPromptId)
@@ -431,9 +433,10 @@ public class AiService {
      * - appendExisting=true：把本章已有内容的尾部作为上下文，让 AI 从断点**续写**（只增不重）。
      * 「从当前内容接着写」入口走这条。
      *
-    /**
+     * /**
+     * 
      * @param totalChapters 全书总章节数（用于判断本章是否为终章）；为 null 时按已存在章节数推断
-     * @param authorNote 「作者有话说」：作者对本章的干预要求；为空时完全不注入（不改变既有行为）
+     * @param authorNote    「作者有话说」：作者对本章的干预要求；为空时完全不注入（不改变既有行为）
      */
     public Flux<String> writeChapter(Long novelId, Long chapterId, User user, Integer totalChapters,
             boolean appendExisting, String authorNote) {
@@ -676,8 +679,7 @@ public class AiService {
     private static final int FORESHADOW_NEW_MAX = 3;
     private static final Duration FORESHADOW_SUGGEST_TIMEOUT = Duration.ofSeconds(60);
     /** 仅用于解析 AI 输出的轻量 JSON；静态实例避免改动构造器签名（测试与调用方零感知） */
-    private static final com.fasterxml.jackson.databind.ObjectMapper SUGGEST_JSON =
-            new com.fasterxml.jackson.databind.ObjectMapper();
+    private static final com.fasterxml.jackson.databind.ObjectMapper SUGGEST_JSON = new com.fasterxml.jackson.databind.ObjectMapper();
 
     /**
      * 半自动伏笔记账：针对刚写完的一章正文，让 AI 对照账本中未回收伏笔，
@@ -687,6 +689,7 @@ public class AiService {
      */
     public ForeshadowSuggestVO suggestForeshadowing(Long novelId, Long chapterId, User user) {
         Novel novel = novelService.loadOwned(novelId, user);
+        @SuppressWarnings("null")
         Chapter chapter = chapterRepository.findById(chapterId)
                 .filter(c -> !c.isDeleted() && novel.getId().equals(c.getNovelId()))
                 .orElseThrow(() -> new BizException(404, "章节不存在", 404));
@@ -700,7 +703,7 @@ public class AiService {
         try {
             StringBuilder acc = new StringBuilder();
             llm(user).stream(AiTaskType.FORESHADOW_SUGGEST, contextOf(novel, null),
-                            SYSTEM_PROMPT, foreshadowSuggestPrompt(chapter, open))
+                    SYSTEM_PROMPT, foreshadowSuggestPrompt(chapter, open))
                     .doOnNext(acc::append)
                     .blockLast(FORESHADOW_SUGGEST_TIMEOUT);
             return parseForeshadowSuggest(acc.toString(), open, chapter.getChapterOrder());

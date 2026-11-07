@@ -55,6 +55,7 @@ public class ForeshadowingService {
     }
 
     /** 编辑：title/content/plantedOrder/expectedOrder 传 null 表示不改该字段 */
+    @SuppressWarnings("null")
     @Transactional
     public void update(Long novelId, Long foreshadowId, User user, ForeshadowReq req) {
         novelService.loadOwned(novelId, user);
@@ -75,6 +76,7 @@ public class ForeshadowingService {
     }
 
     /** 状态流转：OPEN → RESOLVED（回填实际回收章）/ ABANDONED；也可重新打开 */
+    @SuppressWarnings("null")
     @Transactional
     public void changeStatus(Long novelId, Long foreshadowId, User user, ForeshadowStatusReq req) {
         novelService.loadOwned(novelId, user);
@@ -88,6 +90,7 @@ public class ForeshadowingService {
         repository.save(f);
     }
 
+    @SuppressWarnings("null")
     @Transactional
     public void remove(Long novelId, Long foreshadowId, User user) {
         novelService.loadOwned(novelId, user);
@@ -95,6 +98,7 @@ public class ForeshadowingService {
     }
 
     private Foreshadowing loadOwned(Long novelId, Long foreshadowId) {
+        @SuppressWarnings("null")
         Foreshadowing f = repository.findById(foreshadowId)
                 .orElseThrow(() -> new BizException(404, "伏笔不存在", 404));
         if (!f.getNovelId().equals(novelId)) {

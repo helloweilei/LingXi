@@ -46,8 +46,8 @@ public class CharacterService {
     private final ObjectMapper objectMapper;
 
     public CharacterService(CharacterRepository characterRepository, CharacterRelationRepository relationRepository,
-                            NovelService novelService, LlmClientProvider llmClientProvider,
-                            ObjectMapper objectMapper) {
+            NovelService novelService, LlmClientProvider llmClientProvider,
+            ObjectMapper objectMapper) {
         this.characterRepository = characterRepository;
         this.relationRepository = relationRepository;
         this.novelService = novelService;
@@ -137,6 +137,7 @@ public class CharacterService {
         return toRelationVO(r);
     }
 
+    @SuppressWarnings("null")
     @Transactional
     public void deleteRelation(Long id, User user) {
         relationRepository.delete(loadOwnedRelation(id, user));
@@ -147,6 +148,7 @@ public class CharacterService {
      * replace=true 时先清空已有关系再写入；否则只追加不重复的关系。
      * 不在方法上开事务：模型调用可能持续数十秒，不应一直占用数据库连接。
      */
+    @SuppressWarnings("null")
     public List<RelationVO> inferRelations(Long novelId, User user, boolean replace) {
         Novel novel = novelService.loadOwned(novelId, user);
         List<NovelCharacter> characters = characterRepository.findByNovelIdOrderByCreatedAtAscIdAsc(novelId);
@@ -154,6 +156,7 @@ public class CharacterService {
             throw new BizException("至少需要两个角色才能推理关系");
         }
         StringBuilder raw = new StringBuilder();
+        @SuppressWarnings("null")
         AiContext ctx = new AiContext(novel.getTitle(), novel.getGenre(),
                 characters.stream().map(NovelCharacter::getName).toList(), null);
         llmClientProvider.forUser(user)
@@ -259,6 +262,7 @@ public class CharacterService {
     }
 
     private CharacterRelation loadOwnedRelation(Long id, User user) {
+        @SuppressWarnings("null")
         CharacterRelation r = relationRepository.findById(id)
                 .orElseThrow(() -> new BizException(404, "关系不存在", 404));
         novelService.loadOwned(r.getNovelId(), user);
@@ -266,6 +270,7 @@ public class CharacterService {
     }
 
     private void requireInNovel(Long characterId, Long novelId) {
+        @SuppressWarnings("null")
         boolean ok = characterRepository.findById(characterId)
                 .map(c -> c.getNovelId().equals(novelId))
                 .orElse(false);
@@ -275,6 +280,7 @@ public class CharacterService {
     }
 
     private NovelCharacter loadOwned(Long id, User user) {
+        @SuppressWarnings("null")
         NovelCharacter c = characterRepository.findById(id)
                 .orElseThrow(() -> new BizException(404, "角色不存在", 404));
         novelService.loadOwned(c.getNovelId(), user);
